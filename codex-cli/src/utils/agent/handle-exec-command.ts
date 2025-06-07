@@ -13,6 +13,7 @@ import { isLoggingEnabled, log } from "../logger/log.js";
 import { SandboxType } from "./sandbox/interface.js";
 import { PATH_TO_SEATBELT_EXECUTABLE } from "./sandbox/macos-seatbelt.js";
 import fs from "fs/promises";
+import os from "os";
 
 // ---------------------------------------------------------------------------
 // Session‑level cache of commands that the user has chosen to always approve.
@@ -24,6 +25,29 @@ import fs from "fs/promises";
 // subsequent, equivalent invocations during the same CLI session.
 // ---------------------------------------------------------------------------
 const alwaysApprovedCommands = new Set<string>();
+
+// ---------------------------------------------------------------------------
+// Windows command mapping for common Unix commands
+// ---------------------------------------------------------------------------
+const WINDOWS_COMMAND_MAP: Record<string, string> = {
+  ls: "dir",
+  cat: "type",
+  grep: "findstr",
+  which: "where",
+  pwd: "cd", // In cmd.exe, 'cd' without arguments shows current directory
+  cp: "copy",
+  mv: "move",
+  rm: "del",
+  mkdir: "mkdir", // Same
+  rmdir: "rmdir", // Same
+  touch: "echo. > ", // Approximate equivalent
+  head: "type", // Partial equivalent
+  tail: "type", // No direct equivalent, but type shows content
+  ps: "tasklist",
+  kill: "taskkill",
+  chmod: "attrib", // Approximate equivalent
+  find: "dir /s", // Approximate equivalent for file finding
+};
 
 // ---------------------------------------------------------------------------
 // Helper: Given the argv-style representation of a command, return a stable
@@ -65,6 +89,38 @@ function deriveCommandKey(cmd: Array<string>): string {
   return JSON.stringify(cmd);
 }
 
+// ---------------------------------------------------------------------------
+// Helper: Generate a helpful error message with Windows command suggestions
+// ---------------------------------------------------------------------------
+function generateWindowsCommandSuggestion(
+  command: Array<string>,
+  error: string,
+): string {
+  if (os.platform() !== "win32" || command.length === 0) {
+    return error;
+  }
+
+  const baseCommand = command[0];
+  if (!baseCommand) {
+    return error;
+  }
+
+  const windowsEquivalent = WINDOWS_COMMAND_MAP[baseCommand];
+
+  if (windowsEquivalent && error.includes("ENOENT")) {
+    return `${error}
+
+💡 Windows Suggestion: The command '${baseCommand}' is a Unix command. On Windows, try using '${windowsEquivalent}' instead.
+   
+   Unix: ${command.join(" ")}
+   Windows: ${windowsEquivalent}${command.slice(1).length > 0 ? " " + command.slice(1).join(" ") : ""}
+   
+   Or use PowerShell which supports many Unix-like commands.`;
+  }
+
+  return error;
+}
+
 type HandleExecCommandResult = {
   outputText: string;
   metadata: Record<string, unknown>;
@@ -96,7 +152,7 @@ export async function handleExecCommand(
       additionalWritableRoots,
       config,
       abortSignal,
-    ).then(convertSummaryToResult);
+    ).then((summary) => convertSummaryToResult(summary, command));
   }
 
   // 2) Otherwise fall back to the normal policy
@@ -184,19 +240,27 @@ export async function handleExecCommand(
         config,
         abortSignal,
       );
-      return convertSummaryToResult(summary);
+      return convertSummaryToResult(summary, command);
     }
   } else {
-    return convertSummaryToResult(summary);
+    return convertSummaryToResult(summary, command);
   }
 }
 
 function convertSummaryToResult(
   summary: ExecCommandSummary,
+  command?: Array<string>,
 ): HandleExecCommandResult {
   const { stdout, stderr, exitCode, durationMs } = summary;
+  let outputText = stdout || stderr;
+
+  // If command failed with ENOENT on Windows, provide helpful suggestions
+  if (exitCode !== 0 && command && stderr.includes("ENOENT")) {
+    outputText = generateWindowsCommandSuggestion(command, outputText);
+  }
+
   return {
-    outputText: stdout || stderr,
+    outputText,
     metadata: {
       exit_code: exitCode,
       duration_seconds: Math.round(durationMs / 100) / 10,
@@ -313,6 +377,13 @@ async function getSandbox(runInSandbox: boolean): Promise<SandboxType> {
       // using Landlock in a Linux Docker container from a macOS host may not
       // work.
       return SandboxType.LINUX_LANDLOCK;
+    } else if (process.platform === "win32") {
+      // On Windows, we don't have a native sandbox implementation yet.
+      // For now, fall back to no sandbox but log a warning.
+      log(
+        "Warning: Sandbox requested on Windows, but no Windows sandbox is implemented. Running without sandbox.",
+      );
+      return SandboxType.NONE;
     } else if (CODEX_UNSAFE_ALLOW_NO_SANDBOX) {
       // Allow running without a sandbox if the user has explicitly marked the
       // environment as already being sufficiently locked-down.

@@ -1596,18 +1596,44 @@ export class AgentLoop {
   }
 }
 
-// Dynamic developer message prefix: includes user, workdir, and rg suggestion.
+// Dynamic developer message prefix: includes user, workdir, OS info, and tool suggestions.
 const userName = os.userInfo().username;
 const workdir = process.cwd();
+const platform = os.platform();
+const isWindows = platform === "win32";
+
 const dynamicLines: Array<string> = [
   `User: ${userName}`,
   `Workdir: ${workdir}`,
+  `Operating System: ${platform === "win32" ? "Windows" : platform === "darwin" ? "macOS" : "Linux"}`,
 ];
-if (spawnSync("rg", ["--version"], { stdio: "ignore" }).status === 0) {
+
+// Add OS-specific command guidance
+if (isWindows) {
   dynamicLines.push(
-    "- Always use rg instead of grep/ls -R because it is much faster and respects gitignore",
+    "IMPORTANT: You are running on Windows. Use Windows commands:",
+    "- Use 'dir' instead of 'ls' to list files",
+    "- Use 'type' instead of 'cat' to display file contents",
+    "- Use 'cd' to change directories (same as Unix)",
+    "- Use 'where' instead of 'which' to find executables",
+    "- Use 'findstr' instead of 'grep' for text searching",
+    "- Use PowerShell or cmd.exe syntax for commands",
+    "- File paths use backslashes (\\) but forward slashes (/) also work",
+  );
+} else {
+  dynamicLines.push(
+    "You are running on a Unix-like system (Linux/macOS). Use standard Unix commands.",
   );
 }
+
+// Check for ripgrep availability with appropriate command for OS
+const rgCommand = isWindows ? "rg.exe" : "rg";
+if (spawnSync(rgCommand, ["--version"], { stdio: "ignore" }).status === 0) {
+  dynamicLines.push(
+    "- Always use rg instead of grep/findstr because it is much faster and respects gitignore",
+  );
+}
+
 const dynamicPrefix = dynamicLines.join("\n");
 const prefix = `You are operating as and within the Codex CLI, a terminal-based agentic coding assistant built by OpenAI. It wraps OpenAI models to enable natural language interaction with a local codebase. You are expected to be precise, safe, and helpful.
 
