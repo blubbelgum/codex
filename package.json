@@ -42,10 +42,16 @@
     "*.json": "prettier --write",
     "*.md": "prettier --write",
     ".github/workflows/*.yml": "prettier --write",
-    "**/*.{js,ts,tsx}": [
+    "codex-cli/src/**/*.{js,ts,tsx}": [
       "prettier --write",
-      "pnpm --filter @openai/codex run lint",
-      "cd codex-cli && pnpm run typecheck"
+      "pnpm --filter @openai/codex run lint"
+    ],
+    "codex-cli/tests/**/*.{js,ts,tsx}": [
+      "prettier --write",
+      "pnpm --filter @openai/codex run lint"
+    ],
+    "**/*.{js,ts,tsx}": [
+      "node codex-cli/scripts/typecheck-staged.js"
     ]
   },
   "packageManager": "pnpm@10.8.1"
