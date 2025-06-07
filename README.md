@@ -15,14 +15,24 @@
 - [Experimental technology disclaimer](#experimental-technology-disclaimer)
 - [Quickstart](#quickstart)
 - [Why Codex?](#why-codex)
+- [Agentic Tools Interface](#agentic-tools-interface)
+  - [Tool Discovery and Project Analysis](#tool-discovery-and-project-analysis)
+  - [Command Composer](#command-composer)
+  - [Enhanced Approval System](#enhanced-approval-system)
+  - [Session History Management](#session-history-management)
+  - [Accessing Agentic Tools](#accessing-agentic-tools)
 - [Security model & permissions](#security-model--permissions)
   - [Platform sandboxing details](#platform-sandboxing-details)
 - [System requirements](#system-requirements)
 - [CLI reference](#cli-reference)
+  - [Interactive Commands](#interactive-commands)
+  - [Agentic Tools Shortcuts](#agentic-tools-shortcuts)
 - [Memory & project docs](#memory--project-docs)
 - [Non-interactive / CI mode](#non-interactive--ci-mode)
 - [Tracing / verbose logging](#tracing--verbose-logging)
 - [Recipes](#recipes)
+  - [Basic Commands](#basic-commands)
+  - [Agentic Tools Examples](#agentic-tools-examples)
 - [Installation](#installation)
 - [Configuration guide](#configuration-guide)
   - [Basic configuration parameters](#basic-configuration-parameters)
@@ -154,9 +164,63 @@ development_ that understands and executes your repo.
 
 - **Zero setup** - bring your OpenAI API key and it just works!
 - **Full auto-approval, while safe + secure** by running network-disabled and directory-sandboxed
-- **Multimodal** - pass in screenshots or diagrams to implement features ✨
+- **Multimodal** - pass in screenshots or diagrams to implement features
+- **Agentic tools interface** - intelligent project analysis and command composition
 
 And it's **fully open-source** so you can see and contribute to how it develops!
+
+## Agentic Tools Interface
+
+Codex includes an advanced agentic tools interface that provides intelligent assistance for project analysis, command composition, and session management. Access these capabilities by typing `/tools` in the interactive REPL or pressing the number keys 1-3.
+
+### Tool Discovery and Project Analysis
+
+The tool discovery system performs context-aware analysis of your codebase to provide intelligent suggestions:
+
+- **Framework Detection**: Automatically identifies React, Vue, Next.js, TypeScript, and other frameworks
+- **Code Quality Analysis**: Analyzes code complexity, test coverage, and potential issues
+- **Dependency Analysis**: Reviews package.json and identifies outdated or vulnerable dependencies
+- **Performance Assessment**: Detects performance bottlenecks and optimization opportunities
+- **Security Scanning**: Identifies potential security vulnerabilities and suggests fixes
+
+### Command Composer
+
+The AI-powered command composer helps you build complex commands with confidence:
+
+- **Step-by-Step Reasoning**: Breaks down complex tasks into logical steps
+- **Risk Assessment**: Evaluates command safety with platform-specific guidance
+- **Time Estimation**: Provides estimated execution duration for operations
+- **Windows Compatibility**: Automatic translation of Unix commands for Windows environments
+- **Command Preview**: Shows exactly what will be executed before running
+
+### Enhanced Approval System
+
+The enhanced approval dialog provides detailed analysis before executing commands:
+
+- **Risk Level Assessment**: Categorizes commands as low, medium, or high risk
+- **Platform-Specific Warnings**: Windows-specific guidance for command translation
+- **Detailed Command Analysis**: Shows potential issues and suggested improvements
+- **Progress Tracking**: Real-time feedback during command execution
+- **Error Prevention**: Identifies common mistakes before execution
+
+### Session History Management
+
+View and manage your past Codex sessions:
+
+- **Session Metadata**: Track model used, duration, and command count
+- **Session Browsing**: Navigate through historical interactions
+- **Summary Information**: Quick overview of what was accomplished
+- **Session Resumption**: Continue from previous session states
+
+### Accessing Agentic Tools
+
+| Mode                 | Access          | Description                                         |
+| -------------------- | --------------- | --------------------------------------------------- |
+| **Tool Palette**     | `/tools` or `1` | Browse available tools with intelligent suggestions |
+| **Command Composer** | `2`             | AI-assisted command building and composition        |
+| **Session History**  | `3`             | View and manage past Codex sessions                 |
+
+All agentic features integrate seamlessly with the existing approval modes and security model, maintaining the same sandboxing and permission controls.
 
 ---
 
@@ -222,6 +286,23 @@ The hardening mechanism Codex uses depends on your OS:
 | `codex -q "..."`                     | Non-interactive "quiet mode"        | `codex -q --json "explain utils.ts"` |
 | `codex completion <bash\|zsh\|fish>` | Print shell completion script       | `codex completion bash`              |
 
+### Interactive Commands
+
+| Command    | Purpose                      | Shortcut |
+| ---------- | ---------------------------- | -------- |
+| `/tools`   | Open agentic tools interface | -        |
+| `/clear`   | Clear conversation history   | -        |
+| `/compact` | Reduce conversation context  | -        |
+| `/help`    | Show available commands      | -        |
+
+### Agentic Tools Shortcuts
+
+| Key | Mode             | Description                         |
+| --- | ---------------- | ----------------------------------- |
+| `1` | Tool Palette     | Browse intelligent tool suggestions |
+| `2` | Command Composer | AI-assisted command building        |
+| `3` | Session History  | View and manage past sessions       |
+
 Key flags: `--model/-m`, `--approval-mode/-a`, `--quiet/-q`, and `--notify`.
 
 ---
@@ -266,7 +347,9 @@ DEBUG=true codex
 
 Below are a few bite-size examples you can copy-paste. Replace the text in quotes with your own task. See the [prompting guide](https://github.com/openai/codex/blob/main/codex-cli/examples/prompting_guide.md) for more tips and usage patterns.
 
-| ✨  | What you type                                                                   | What happens                                                               |
+### Basic Commands
+
+| #   | What you type                                                                   | What happens                                                               |
 | --- | ------------------------------------------------------------------------------- | -------------------------------------------------------------------------- |
 | 1   | `codex "Refactor the Dashboard component to React Hooks"`                       | Codex rewrites the class component, runs `npm test`, and shows the diff.   |
 | 2   | `codex "Generate SQL migrations for adding a users table"`                      | Infers your ORM, creates migration files, and runs them in a sandboxed DB. |
@@ -275,6 +358,16 @@ Below are a few bite-size examples you can copy-paste. Replace the text in quote
 | 5   | `codex "Explain what this regex does: ^(?=.*[A-Z]).{8,}$"`                      | Outputs a step-by-step human explanation.                                  |
 | 6   | `codex "Carefully review this repo, and propose 3 high impact well-scoped PRs"` | Suggests impactful PRs in the current codebase.                            |
 | 7   | `codex "Look for vulnerabilities and create a security review report"`          | Finds and explains security bugs.                                          |
+
+### Agentic Tools Examples
+
+| #   | What you type                    | What happens                                                                                 |
+| --- | -------------------------------- | -------------------------------------------------------------------------------------------- |
+| 8   | `/tools` then browse suggestions | Opens intelligent tool palette with context-aware recommendations for your project           |
+| 9   | Press `2` for Command Composer   | AI guides you through building complex commands with safety analysis                         |
+| 10  | Press `3` for Session History    | Browse previous Codex sessions with metadata and resumption options                          |
+| 11  | `/tools` in a React project      | Shows React-specific tools like component analysis, hook optimization, and testing utilities |
+| 12  | Command Composer for deployment  | Breaks down deployment into steps with risk assessment and timing estimates                  |
 
 ---
 

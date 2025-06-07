@@ -23,6 +23,7 @@ import {
 import { log } from "../logger/log.js";
 import { parseToolCallArguments } from "../parsers.js";
 import { responsesCreateViaChatCompletions } from "../responses.js";
+import { SessionLogger } from "../session-logger.js";
 import {
   ORIGIN,
   getSessionId,
@@ -128,6 +129,9 @@ export class AgentLoop {
   private additionalWritableRoots: ReadonlyArray<string>;
   /** Whether we ask the API to persist conversation state on the server */
   private readonly disableResponseStorage: boolean;
+
+  /** Session logger for debugging and history */
+  private sessionLogger?: SessionLogger;
 
   // Using `InstanceType<typeof OpenAI>` sidesteps typing issues with the OpenAI package under
   // the TS 5+ `moduleResolution=bundler` setup. OpenAI client instance. We keep the concrete
@@ -257,6 +261,14 @@ export class AgentLoop {
     }
     this.terminated = true;
 
+    // Finalize session logger
+    if (this.sessionLogger) {
+      this.sessionLogger.logSystemEvent("agent_loop_terminated");
+      this.sessionLogger.finalize().catch((error) => {
+        log(`Failed to finalize session logger: ${error}`);
+      });
+    }
+
     this.hardAbort.abort();
 
     this.cancel();
@@ -310,6 +322,26 @@ export class AgentLoop {
 
     this.disableResponseStorage = disableResponseStorage ?? false;
     this.sessionId = getSessionId() || randomUUID().replaceAll("-", "");
+
+    // Initialize session logger for debugging and history
+    try {
+      this.sessionLogger = new SessionLogger(
+        this.sessionId,
+        this.model,
+        this.provider,
+        this.approvalPolicy,
+        CLI_VERSION,
+      );
+      this.sessionLogger.logSystemEvent("agent_loop_initialized", {
+        model: this.model,
+        provider: this.provider,
+        approvalPolicy: this.approvalPolicy,
+        disableResponseStorage: this.disableResponseStorage,
+      });
+    } catch (error) {
+      log(`Failed to initialize session logger: ${error}`);
+    }
+
     // Configure OpenAI client with optional timeout (ms) from environment
     const timeoutMs = OPENAI_TIMEOUT_MS;
     const apiKey = this.config.apiKey ?? process.env["OPENAI_API_KEY"] ?? "";
@@ -695,6 +727,9 @@ export class AgentLoop {
           return;
         }
         alreadyStagedItemIds.add(item.id);
+
+        // Log item to session logger for debugging/history
+        this.sessionLogger?.logResponseItem(item);
 
         // Store the item so the final flush can still operate on a complete list.
         // We'll nil out entries once they're delivered.

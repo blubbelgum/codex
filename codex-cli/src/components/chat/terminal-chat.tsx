@@ -35,6 +35,7 @@ import HelpOverlay from "../help-overlay.js";
 import HistoryOverlay from "../history-overlay.js";
 import ModelOverlay from "../model-overlay.js";
 import SessionsOverlay from "../sessions-overlay.js";
+import AgenticOverlay from "../ui/agentic-overlay.js";
 import chalk from "chalk";
 import fs from "fs/promises";
 import { Box, Text } from "ink";
@@ -49,7 +50,8 @@ export type OverlayModeType =
   | "model"
   | "approval"
   | "help"
-  | "diff";
+  | "diff"
+  | "agentic";
 
 type Props = {
   config: AppConfig;
@@ -526,6 +528,7 @@ export default function TerminalChat({
             openApprovalOverlay={() => setOverlayMode("approval")}
             openHelpOverlay={() => setOverlayMode("help")}
             openSessionsOverlay={() => setOverlayMode("sessions")}
+            openAgenticOverlay={() => setOverlayMode("agentic")}
             openDiffOverlay={() => {
               const { isGitRepo, diff } = getGitDiff();
               let text: string;
@@ -758,6 +761,37 @@ export default function TerminalChat({
           <DiffOverlay
             diffText={diffText}
             onExit={() => setOverlayMode("none")}
+          />
+        )}
+
+        {overlayMode === "agentic" && (
+          <AgenticOverlay
+            isVisible={true}
+            userQuery={_initialPrompt || ""}
+            onExecuteCommand={(command) => {
+              // Parse command and convert to input format
+              const inputItem = {
+                role: "user" as const,
+                content: [{ type: "input_text" as const, text: command }],
+                type: "message" as const,
+              };
+              agent?.run([inputItem], lastResponseId || "");
+              setOverlayMode("none");
+            }}
+            onClose={() => setOverlayMode("none")}
+            onSuggestionAccept={(suggestion) => {
+              if (suggestion.command) {
+                const inputItem = {
+                  role: "user" as const,
+                  content: [
+                    { type: "input_text" as const, text: suggestion.command },
+                  ],
+                  type: "message" as const,
+                };
+                agent?.run([inputItem], lastResponseId || "");
+              }
+              setOverlayMode("none");
+            }}
           />
         )}
       </Box>
