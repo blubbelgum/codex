@@ -293,6 +293,18 @@ const model = cli.flags.model ?? config.model;
 const imagePaths = cli.flags.image;
 const provider = cli.flags.provider ?? config.provider ?? "openai";
 
+// For --login, validate that it's only used with OpenAI provider
+if (cli.flags.login && provider.toLowerCase() !== "openai") {
+  // eslint-disable-next-line no-console
+  console.error(
+    `\n${chalk.red("The --login flag is only available for OpenAI provider.")}\n\n` +
+      `Currently using provider: ${provider}\n` +
+      `To authenticate with OpenAI, use: codex --provider openai --login\n` +
+      `For other providers, set the appropriate environment variable (e.g., ANTHROPIC_API_KEY, GEMINI_API_KEY).\n`,
+  );
+  process.exit(1);
+}
+
 const client = {
   issuer: "https://auth.openai.com",
   client_id: "app_EMoamEEZ73f0CkXaXp7hrann",
@@ -307,28 +319,10 @@ let savedTokens:
     }
   | undefined;
 
-// Try to load existing auth file if present
-try {
-  const home = os.homedir();
-  const authDir = path.join(home, ".codex");
-  const authFile = path.join(authDir, "auth.json");
-  if (fs.existsSync(authFile)) {
-    const data = JSON.parse(fs.readFileSync(authFile, "utf-8"));
-    savedTokens = data.tokens;
-    const lastRefreshTime = data.last_refresh
-      ? new Date(data.last_refresh).getTime()
-      : 0;
-    const expired = Date.now() - lastRefreshTime > 28 * 24 * 60 * 60 * 1000;
-    if (data.OPENAI_API_KEY && !expired) {
-      apiKey = data.OPENAI_API_KEY;
-    }
-  }
-} catch {
-  // ignore errors
-}
-
-if (cli.flags.login) {
-  apiKey = await fetchApiKey(client.issuer, client.client_id);
+// Handle authentication based on provider
+if (provider.toLowerCase() === "openai") {
+  // OpenAI specific authentication flow
+  // Try to load existing auth file if present
   try {
     const home = os.homedir();
     const authDir = path.join(home, ".codex");
@@ -336,17 +330,52 @@ if (cli.flags.login) {
     if (fs.existsSync(authFile)) {
       const data = JSON.parse(fs.readFileSync(authFile, "utf-8"));
       savedTokens = data.tokens;
+      const lastRefreshTime = data.last_refresh
+        ? new Date(data.last_refresh).getTime()
+        : 0;
+      const expired = Date.now() - lastRefreshTime > 28 * 24 * 60 * 60 * 1000;
+      if (data.OPENAI_API_KEY && !expired) {
+        apiKey = data.OPENAI_API_KEY;
+      }
     }
   } catch {
-    /* ignore */
+    // ignore errors
   }
-} else if (!apiKey) {
-  apiKey = await fetchApiKey(client.issuer, client.client_id);
+
+  if (cli.flags.login) {
+    apiKey = await fetchApiKey(client.issuer, client.client_id);
+    try {
+      const home = os.homedir();
+      const authDir = path.join(home, ".codex");
+      const authFile = path.join(authDir, "auth.json");
+      if (fs.existsSync(authFile)) {
+        const data = JSON.parse(fs.readFileSync(authFile, "utf-8"));
+        savedTokens = data.tokens;
+      }
+    } catch {
+      /* ignore */
+    }
+  } else if (!apiKey) {
+    apiKey = await fetchApiKey(client.issuer, client.client_id);
+  }
+  // Ensure the API key is available as an environment variable for legacy code
+  process.env["OPENAI_API_KEY"] = apiKey;
+} else {
+  // For non-OpenAI providers, get API key from environment variables
+  const { getApiKey } = await import("./utils/config.js");
+  apiKey = getApiKey(provider) || "";
 }
-// Ensure the API key is available as an environment variable for legacy code
-process.env["OPENAI_API_KEY"] = apiKey;
 
 if (cli.flags.free) {
+  if (provider.toLowerCase() !== "openai") {
+    // eslint-disable-next-line no-console
+    console.error(
+      `\n${chalk.red("The --free flag is only available for OpenAI provider.")}\n\n` +
+        `Currently using provider: ${provider}\n` +
+        `To redeem free credits, use: codex --provider openai --free\n`,
+    );
+    process.exit(1);
+  }
   // eslint-disable-next-line no-console
   console.log(`${chalk.bold("codex --free")} attempting to redeem credits...`);
   if (!savedTokens?.refresh_token) {
@@ -367,12 +396,16 @@ const NO_API_KEY_REQUIRED = new Set(["ollama"]);
 
 // Skip API key validation for providers that don't require an API key
 if (!apiKey && !NO_API_KEY_REQUIRED.has(provider.toLowerCase())) {
+  // Get the expected environment variable name from providers config
+  const { providers } = await import("./utils/providers.js");
+  const providerConfig = providers[provider.toLowerCase()];
+  const envVarName =
+    providerConfig?.envKey || `${provider.toUpperCase()}_API_KEY`;
+
   // eslint-disable-next-line no-console
   console.error(
     `\n${chalk.red(`Missing ${provider} API key.`)}\n\n` +
-      `Set the environment variable ${chalk.bold(
-        `${provider.toUpperCase()}_API_KEY`,
-      )} ` +
+      `Set the environment variable ${chalk.bold(envVarName)} ` +
       `and re-run this command.\n` +
       `${
         provider.toLowerCase() === "openai"
@@ -380,12 +413,19 @@ if (!apiKey && !NO_API_KEY_REQUIRED.has(provider.toLowerCase())) {
               chalk.underline("https://platform.openai.com/account/api-keys"),
             )}\n`
           : provider.toLowerCase() === "gemini"
-            ? `You can create a ${chalk.bold(
-                `${provider.toUpperCase()}_API_KEY`,
-              )} ` + `in the ${chalk.bold(`Google AI Studio`)}.\n`
-            : `You can create a ${chalk.bold(
-                `${provider.toUpperCase()}_API_KEY`,
-              )} ` + `in the ${chalk.bold(`${provider}`)} dashboard.\n`
+            ? `You can create a ${chalk.bold(envVarName)} ` +
+              `in the ${chalk.bold(`Google AI Studio`)}.\n`
+            : provider.toLowerCase() === "anthropic"
+              ? `You can create a ${chalk.bold(envVarName)} ` +
+                `in the ${chalk.bold(`Anthropic Console`)}.\n`
+              : provider.toLowerCase() === "mistral"
+                ? `You can create a ${chalk.bold(envVarName)} ` +
+                  `in the ${chalk.bold(`Mistral AI Platform`)}.\n`
+                : provider.toLowerCase() === "groq"
+                  ? `You can create a ${chalk.bold(envVarName)} ` +
+                    `in the ${chalk.bold(`Groq Console`)}.\n`
+                  : `You can create a ${chalk.bold(envVarName)} ` +
+                    `in the ${chalk.bold(`${provider}`)} dashboard.\n`
       }`,
   );
   process.exit(1);
