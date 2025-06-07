@@ -26,22 +26,23 @@ describe("getFileSystemSuggestions", () => {
   });
 
   it("expands ~ to home directory", () => {
-    mockOs.homedir = vi.fn(() => "/home/testuser");
+    const homeDir = path.resolve(path.join(path.sep, "home", "testuser"));
+    mockOs.homedir = vi.fn(() => homeDir);
     mockFs.readdirSync = vi.fn(() => ["file1.txt", "docs"]);
     mockFs.statSync = vi.fn((p) => ({
       isDirectory: () => path.basename(p) === "docs",
     }));
 
-    const result = getFileSystemSuggestions("~/");
+    const result = getFileSystemSuggestions("~" + path.sep);
 
-    expect(mockFs.readdirSync).toHaveBeenCalledWith("/home/testuser");
+    expect(mockFs.readdirSync).toHaveBeenCalledWith(homeDir);
     expect(result).toEqual([
       {
-        path: path.join("/home/testuser", "file1.txt"),
+        path: path.join(homeDir, "file1.txt"),
         isDirectory: false,
       },
       {
-        path: path.join("/home/testuser", "docs" + path.sep),
+        path: path.join(homeDir, "docs") + path.sep,
         isDirectory: true,
       },
     ]);
@@ -60,7 +61,7 @@ describe("getFileSystemSuggestions", () => {
         isDirectory: false,
       },
       {
-        path: "abd.txt/",
+        path: "abd.txt" + path.sep,
         isDirectory: true,
       },
     ]);
@@ -85,8 +86,8 @@ describe("getFileSystemSuggestions", () => {
     const paths = result.map((item) => item.path);
     const allDirectories = result.every((item) => item.isDirectory === true);
 
-    expect(paths).toContain("foo/");
-    expect(paths).toContain("bar/");
+    expect(paths).toContain("foo" + path.sep);
+    expect(paths).toContain("bar" + path.sep);
     expect(allDirectories).toBe(true);
   });
 });

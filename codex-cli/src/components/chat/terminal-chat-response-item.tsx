@@ -349,7 +349,14 @@ function rewriteFileCitations(
     if (!fileOpener) {
       return `[${file}](${absPath})`;
     }
-    const uri = `${fileOpener}://file${absPath}:${start}`;
+
+    // Convert Windows paths to valid file URIs
+    let uriPath = absPath.replace(/\\/g, "/");
+    if (uriPath[0] !== "/") {
+      uriPath = `/${uriPath}`;
+    }
+
+    const uri = `${fileOpener}://file${uriPath}:${start}`;
     const label = `${file}:${start}`;
     // In practice, sometimes multiple citations for the same file, but with a
     // different line number, are shown sequentially, so we:
