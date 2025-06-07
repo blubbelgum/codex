@@ -20,7 +20,8 @@
     "typecheck": "tsc --noEmit",
     "build": "node build.mjs",
     "build:dev": "NODE_ENV=development node build.mjs --dev && NODE_OPTIONS=--enable-source-maps node dist/cli-dev.js",
-    "stage-release": "./scripts/stage_release.sh"
+    "stage-release": "node scripts/stage_release.js",
+    "stage-release-bash": "./scripts/stage_release.sh"
   },
   "files": [
     "bin",

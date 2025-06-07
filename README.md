@@ -762,6 +762,15 @@ pnpm stage-release --tmp "$RELEASE_DIR"
 pnpm stage-release --native
 ```
 
+**Windows Compatibility**: The staging script now works natively on Windows. You can use any of these approaches:
+
+- `pnpm stage-release` (cross-platform Node.js script)
+- `node scripts/stage_release.js` (direct Node.js call)
+- `.\scripts\stage_release.ps1` (PowerShell script)
+- `scripts\stage_release.bat` (batch file)
+
+For detailed Windows instructions, see [`codex-cli/WINDOWS_DISTRIBUTION.md`](codex-cli/WINDOWS_DISTRIBUTION.md).
+
 Go to the folder where the release is staged and verify that it works as intended. If so, run the following from the temp folder:
 
 ```
