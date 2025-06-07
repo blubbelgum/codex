@@ -87,12 +87,18 @@ type AgentLoopParams = {
 const shellFunctionTool: FunctionTool = {
   type: "function",
   name: "shell",
-  description: "Runs a shell command, and returns its output.",
+  description:
+    "Runs a shell command, and returns its output. The command must be an array of strings where the first element is the executable name (like 'ls', 'node', 'cat') and subsequent elements are arguments.",
   strict: false,
   parameters: {
     type: "object",
     properties: {
-      command: { type: "array", items: { type: "string" } },
+      command: {
+        type: "array",
+        items: { type: "string" },
+        description:
+          "Array of command and arguments. First element must be the executable name (e.g., ['ls', '-la'] or ['node', 'file.js']). Never use shell prompts like '$', '>', or '#'.",
+      },
       workdir: {
         type: "string",
         description: "The working directory for the command.",
@@ -412,10 +418,26 @@ export class AgentLoop {
     );
 
     if (args == null) {
+      // Provide specific error messages for common mistakes
+      let errorMessage = `Invalid command arguments: ${rawArguments}`;
+      try {
+        const parsedArgs = JSON.parse(rawArguments ?? "{}");
+        if (parsedArgs.patch && !parsedArgs.cmd && !parsedArgs.command) {
+          errorMessage = `Error: Found "patch" parameter instead of "cmd". Correct format: {"cmd":["apply_patch", "*** Begin Patch\\n*** Add File: filename\\n+file content\\n*** End Patch"]}`;
+        } else if (!parsedArgs.cmd && !parsedArgs.command) {
+          errorMessage = `Error: Missing "cmd" parameter. Use {"cmd":["command_name", "arg1", "arg2"]} format.`;
+        }
+      } catch {
+        // Keep original error if JSON parsing fails
+      }
+
       const outputItem: ResponseInputItem.FunctionCallOutput = {
         type: "function_call_output",
-        call_id: item.call_id,
-        output: `invalid arguments: ${rawArguments}`,
+        call_id: callId,
+        output: JSON.stringify({
+          output: errorMessage,
+          metadata: { exit_code: 1, duration_seconds: 0 },
+        }),
       };
       return [outputItem];
     }
@@ -1611,14 +1633,12 @@ const dynamicLines: Array<string> = [
 // Add OS-specific command guidance
 if (isWindows) {
   dynamicLines.push(
-    "IMPORTANT: You are running on Windows. Use Windows commands:",
-    "- Use 'dir' instead of 'ls' to list files",
-    "- Use 'type' instead of 'cat' to display file contents",
-    "- Use 'cd' to change directories (same as Unix)",
-    "- Use 'where' instead of 'which' to find executables",
-    "- Use 'findstr' instead of 'grep' for text searching",
-    "- Use PowerShell or cmd.exe syntax for commands",
+    "IMPORTANT: You are running on Windows. Follow these guidelines:",
+    "- Most Unix commands are automatically translated (ls→dir, cat→type, grep→findstr)",
+    "- For file creation, ALWAYS use apply_patch - it's the most reliable method",
+    '- Example: {"cmd":["apply_patch","*** Begin Patch\\n*** Add File: hello.js\\n+console.log(\'Hello World\');\\n*** End Patch"]}',
     "- File paths use backslashes (\\) but forward slashes (/) also work",
+    "- Never concatenate multiple commands in one function call - use one command at a time",
   );
 } else {
   dynamicLines.push(
@@ -1656,7 +1676,12 @@ You MUST adhere to the following criteria when executing the task:
 - Analyzing code for vulnerabilities is allowed.
 - Showing user code and tool call details is allowed.
 - User instructions may overwrite the *CODING GUIDELINES* section in this developer message.
-- Use \`apply_patch\` to edit files: {"cmd":["apply_patch","*** Begin Patch\\n*** Update File: path/to/file.py\\n@@ def example():\\n-  pass\\n+  return 123\\n*** End Patch"]}
+- To CREATE files: {"cmd":["apply_patch","*** Begin Patch\\n*** Add File: filename.js\\n+file content here\\n*** End Patch"]}
+- To EDIT files: {"cmd":["apply_patch","*** Begin Patch\\n*** Update File: filename.js\\n@@ context\\n-old line\\n+new line\\n*** End Patch"]}
+- To RUN commands: {"cmd":["node","filename.js"]} or {"cmd":["ls","-la"]}
+- CRITICAL: Use "cmd" array format - never use "patch" parameter or concatenate commands
+- NEVER use single character commands like "$", ">", or "#" - these are shell prompts, not commands
+- Execute ONE command per function call - do not combine multiple commands
 - If completing the user's task requires writing or modifying files:
     - Your code and final answer should follow these *CODING GUIDELINES*:
         - Fix the problem at the root cause rather than applying surface-level patches, when possible.

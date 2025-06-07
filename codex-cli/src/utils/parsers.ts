@@ -82,7 +82,16 @@ export function parseToolCallArguments(
     return undefined;
   }
 
-  const { cmd, command } = json as Record<string, unknown>;
+  const { cmd, command, patch } = json as Record<string, unknown>;
+
+  // Check for common mistake: using "patch" parameter instead of "cmd"
+  if (patch && !cmd && !command) {
+    log(
+      `Error: Found "patch" parameter instead of "cmd". Use {"cmd":["apply_patch", "patch_content"]} format. Arguments: ${toolCallArguments}`,
+    );
+    return undefined;
+  }
+
   // The OpenAI model sometimes produces a single string instead of an array.
   // Accept both shapes:
   const commandArray =
@@ -90,7 +99,22 @@ export function parseToolCallArguments(
     toStringArray(command) ??
     (typeof cmd === "string" ? [cmd] : undefined) ??
     (typeof command === "string" ? [command] : undefined);
-  if (commandArray == null) {
+
+  if (commandArray == null || commandArray.length === 0) {
+    return undefined;
+  }
+
+  // Check for invalid commands like empty strings or just shell prompts
+  const firstCommand = commandArray[0]?.trim();
+  if (
+    !firstCommand ||
+    firstCommand === "$" ||
+    firstCommand === ">" ||
+    firstCommand === "#"
+  ) {
+    log(
+      `Invalid command detected: ${JSON.stringify(commandArray)} from arguments: ${toolCallArguments}`,
+    );
     return undefined;
   }
 

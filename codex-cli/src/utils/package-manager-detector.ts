@@ -64,7 +64,7 @@ export async function detectInstallerByPath(): Promise<AgentName | undefined> {
 
   for (const mgr of supportedManagers) {
     const binDir = getGlobalBinDir(mgr);
-    if (binDir && invoked.startsWith(binDir)) {
+    if (binDir && invoked.startsWith(resolve(binDir))) {
       return mgr;
     }
   }

@@ -6,16 +6,20 @@ import { log } from "../logger/log.js";
 
 /**
  * Map of Unix commands to their Windows equivalents
+ * Some commands need to be wrapped with cmd.exe /c since they're built-in commands
  */
-const COMMAND_MAP: Record<string, string> = {
-  ls: "dir",
-  grep: "findstr",
-  cat: "type",
-  rm: "del",
-  cp: "copy",
-  mv: "move",
-  touch: "echo.>",
-  mkdir: "md",
+const COMMAND_MAP: Record<string, { cmd: string; useShell?: boolean }> = {
+  ls: { cmd: "dir", useShell: true },
+  grep: { cmd: "findstr", useShell: true },
+  cat: { cmd: "type", useShell: true },
+  rm: { cmd: "del", useShell: true },
+  cp: { cmd: "copy", useShell: true },
+  mv: { cmd: "move", useShell: true },
+  touch: { cmd: "echo.", useShell: true },
+  mkdir: { cmd: "md", useShell: true },
+  pwd: { cmd: "cd", useShell: true },
+  // Don't adapt echo automatically since it has complex quoting issues
+  // Let PowerShell handle it natively
 };
 
 /**
@@ -52,18 +56,24 @@ export function adaptCommandForPlatform(command: Array<string>): Array<string> {
     return command;
   }
 
-  const cmd = command[0];
+  const cmd = command[0]?.trim();
 
-  // If cmd is undefined or the command doesn't need adaptation, return it as is
-  if (!cmd || !COMMAND_MAP[cmd]) {
+  // If cmd is undefined, empty, or just shell prompts, return original command
+  if (!cmd || cmd === "$" || cmd === ">" || cmd === "#") {
+    return command;
+  }
+
+  // If the command doesn't need adaptation, return it as is
+  const commandMapping = COMMAND_MAP[cmd];
+  if (!commandMapping) {
     return command;
   }
 
   log(`Adapting command '${cmd}' for Windows platform`);
 
   // Create a new command array with the adapted command
-  const adaptedCommand = [...command];
-  adaptedCommand[0] = COMMAND_MAP[cmd];
+  let adaptedCommand = [...command];
+  adaptedCommand[0] = commandMapping.cmd;
 
   // Adapt options if needed
   const optionsForCmd = OPTION_MAP[cmd];
@@ -74,6 +84,11 @@ export function adaptCommandForPlatform(command: Array<string>): Array<string> {
         adaptedCommand[i] = optionsForCmd[option];
       }
     }
+  }
+
+  // If the command needs to be run in shell, wrap it with cmd.exe /c
+  if (commandMapping.useShell) {
+    adaptedCommand = ["cmd.exe", "/c", ...adaptedCommand];
   }
 
   log(`Adapted command: ${adaptedCommand.join(" ")}`);

@@ -1,8 +1,28 @@
 import type { AgentLoop } from "../../utils/agent/agent-loop.js";
 
 import { Box, Text } from "ink";
+import os from "node:os";
 import path from "node:path";
 import React from "react";
+
+// Helper function to get user-friendly OS name
+function getOSDisplayName(): string {
+  const platform = os.platform();
+  switch (platform) {
+    case "win32":
+      return "Windows";
+    case "darwin":
+      return "macOS";
+    case "linux":
+      return "Linux";
+    case "freebsd":
+      return "FreeBSD";
+    case "openbsd":
+      return "OpenBSD";
+    default:
+      return platform;
+  }
+}
 
 export interface TerminalHeaderProps {
   terminalRows: number;
@@ -34,7 +54,8 @@ const TerminalHeader: React.FC<TerminalHeaderProps> = ({
       {terminalRows < 10 ? (
         // Compact header for small terminal windows
         <Text>
-          ● Codex v{version} - {PWD} - {model} ({provider}) -{" "}
+          ● Codex CLI v{version} - {getOSDisplayName()} - {PWD} - {model} (
+          {provider}) -{" "}
           <Text color={colorsByPolicy[approvalPolicy]}>{approvalPolicy}</Text>
           {flexModeEnabled ? " - flex-mode" : ""}
         </Text>
@@ -42,9 +63,10 @@ const TerminalHeader: React.FC<TerminalHeaderProps> = ({
         <>
           <Box borderStyle="round" paddingX={1} width={64}>
             <Text>
-              ● OpenAI <Text bold>Codex</Text>{" "}
+              ● <Text bold>Codex CLI</Text>{" "}
               <Text dimColor>
-                (research preview) <Text color="blueBright">v{version}</Text>
+                (powered by {provider}){" "}
+                <Text color="blueBright">v{version}</Text>
               </Text>
             </Text>
           </Box>
@@ -65,11 +87,19 @@ const TerminalHeader: React.FC<TerminalHeaderProps> = ({
               <Text color="blueBright">↳</Text> workdir: <Text bold>{PWD}</Text>
             </Text>
             <Text dimColor>
+              <Text color="blueBright">↳</Text> os:{" "}
+              <Text bold color="cyanBright">
+                {getOSDisplayName()}
+              </Text>
+            </Text>
+            <Text dimColor>
               <Text color="blueBright">↳</Text> model: <Text bold>{model}</Text>
             </Text>
             <Text dimColor>
               <Text color="blueBright">↳</Text> provider:{" "}
-              <Text bold>{provider}</Text>
+              <Text bold color="greenBright">
+                {provider}
+              </Text>
             </Text>
             <Text dimColor>
               <Text color="blueBright">↳</Text> approval:{" "}

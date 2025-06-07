@@ -178,7 +178,19 @@ class Parser {
         this.patch.actions[path] = this.parse_add_file();
         continue;
       }
-      throw new DiffError(`Unknown Line: ${this.lines[this.index]}`);
+      // Check for common mistakes and provide helpful error messages
+      const currentLine = this.lines[this.index]!;
+      if (currentLine.startsWith("*** Create File:")) {
+        throw new DiffError(
+          `Invalid syntax: Use "*** Add File:" not "*** Create File:" for creating new files. Line: ${currentLine}`,
+        );
+      }
+      if (currentLine.startsWith("*** New File:")) {
+        throw new DiffError(
+          `Invalid syntax: Use "*** Add File:" not "*** New File:" for creating new files. Line: ${currentLine}`,
+        );
+      }
+      throw new DiffError(`Unknown Line: ${currentLine}`);
     }
     if (!this.startswith(PATCH_SUFFIX.trim())) {
       throw new DiffError("Missing End Patch");

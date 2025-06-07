@@ -9,6 +9,7 @@ import { join } from "path";
 
 describe("user‑wide ~/.codex.env support", () => {
   const ORIGINAL_HOME = process.env["HOME"];
+  const ORIGINAL_USERPROFILE = process.env["USERPROFILE"];
   const ORIGINAL_API_KEY = process.env["OPENAI_API_KEY"];
 
   let tempHome: string;
@@ -17,6 +18,8 @@ describe("user‑wide ~/.codex.env support", () => {
     // Create an isolated fake $HOME directory.
     tempHome = mkdtempSync(join(tmpdir(), "codex-home-"));
     process.env["HOME"] = tempHome;
+    // On Windows, os.homedir() uses USERPROFILE instead of HOME
+    process.env["USERPROFILE"] = tempHome;
 
     // Ensure the env var is unset so that the file value is picked up.
     delete process.env["OPENAI_API_KEY"];
@@ -44,6 +47,12 @@ describe("user‑wide ~/.codex.env support", () => {
       process.env["HOME"] = ORIGINAL_HOME;
     } else {
       delete process.env["HOME"];
+    }
+
+    if (ORIGINAL_USERPROFILE !== undefined) {
+      process.env["USERPROFILE"] = ORIGINAL_USERPROFILE;
+    } else {
+      delete process.env["USERPROFILE"];
     }
 
     if (ORIGINAL_API_KEY !== undefined) {

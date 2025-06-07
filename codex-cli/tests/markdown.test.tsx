@@ -117,8 +117,9 @@ All of the TypeScript/React code lives under \`src/\`. The main entrypoint for a
   - Runs **single-pass** mode if \`--full-context\` is set.
 
 `;
+    const testCwd = "/home/user/codex";
     const { lastFrame } = renderTui(
-      <Markdown fileOpener={"vscode"} cwd="/home/user/codex">
+      <Markdown fileOpener={"vscode"} cwd={testCwd}>
         {nestedList}
       </Markdown>,
     );
@@ -129,6 +130,11 @@ All of the TypeScript/React code lives under \`src/\`. The main entrypoint for a
     // While the underlying ANSI content is long such that the split appears to
     // be merited, the rendered output is considerably shorter and ideally it
     // would be a single line.
+
+    // On Windows, paths get converted to Windows format, so we need to handle both cases
+    const isWindows = process.platform === "win32";
+    const expectedPath = isWindows ? "/C:/home/user/codex" : "/home/user/codex";
+
     const expectedNestedList = `${GREEN}${BOLD}## 🛠 Core CLI Logic${BOLD_OFF}${COLOR_OFF}
 
 All of the TypeScript/React code lives under ${YELLOW}src/${COLOR_OFF}. The main entrypoint for argument parsing and
@@ -137,8 +143,8 @@ orchestration is:
 ${GREEN}${BOLD}### ${YELLOW}src/cli.tsx${COLOR_OFF}${BOLD_OFF}
 
     * Uses ${BOLD}meow${BOLD_OFF} for flags/subcommands and prints the built-in help/usage:
-      ${BLUE}src/cli.tsx:49 (${LINK_ON}vscode://file/home/user/codex/src/cli.tsx:49${LINK_OFF})${COLOR_OFF} ${BLUE}src/cli.tsx:55 ${COLOR_OFF}
-${BLUE}(${LINK_ON}vscode://file/home/user/codex/src/cli.tsx:55${LINK_OFF})${COLOR_OFF}
+      ${BLUE}src/cli.tsx:49 (${LINK_ON}vscode://file${expectedPath}/src/cli.tsx:49${LINK_OFF})${COLOR_OFF} ${BLUE}src/cli.tsx:55 ${COLOR_OFF}
+${BLUE}(${LINK_ON}vscode://file${expectedPath}/src/cli.tsx:55${LINK_OFF})${COLOR_OFF}
     * Handles special subcommands (e.g. ${YELLOW}codex completion …${COLOR_OFF}), ${YELLOW}--config${COLOR_OFF}, API-key validation, then
 either:
         * Spawns the ${BOLD}AgentLoop${BOLD_OFF} for the normal multi-step prompting/edits flow, or
@@ -150,13 +156,18 @@ either:
   });
 
   it("citations should get converted to hyperlinks when stdout supports them", () => {
+    const testCwd = "/foo/bar";
     const { lastFrame } = renderTui(
-      <Markdown fileOpener={"vscode"} cwd="/foo/bar">
+      <Markdown fileOpener={"vscode"} cwd={testCwd}>
         File with TODO: 【F:src/approvals.ts†L40】
       </Markdown>,
     );
 
-    const expected = `File with TODO: ${BLUE}src/approvals.ts:40 (${LINK_ON}vscode://file/foo/bar/src/approvals.ts:40${LINK_OFF})${COLOR_OFF}`;
+    // On Windows, paths get converted to Windows format, so we need to handle both cases
+    const isWindows = process.platform === "win32";
+    const expectedPath = isWindows ? "/C:/foo/bar" : "/foo/bar";
+
+    const expected = `File with TODO: ${BLUE}src/approvals.ts:40 (${LINK_ON}vscode://file${expectedPath}/src/approvals.ts:40${LINK_OFF})${COLOR_OFF}`;
     const outputWithAnsi = lastFrame();
     expect(outputWithAnsi).toBe(expected);
   });

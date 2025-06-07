@@ -33,13 +33,22 @@ export function getFileSystemSuggestions(
 
     const normalized = path.normalize(expanded);
     const isDir = pathPrefix.endsWith(path.sep);
+
+    // Handle relative paths like "./" by reading current directory
+    if (pathPrefix === "./" || pathPrefix === "." + sep) {
+      const readDir = process.cwd();
+      return fs.readdirSync(readDir).map((item) => {
+        const fullPath = path.join(readDir, item);
+        const isDirectory = fs.statSync(fullPath).isDirectory();
+        return {
+          path: isDirectory ? item + sep : item,
+          isDirectory,
+        };
+      });
+    }
+
     const base = path.basename(normalized);
-
-    const dir =
-      normalized === "." && !pathPrefix.startsWith("." + sep) && !hasTilde
-        ? process.cwd()
-        : path.dirname(normalized);
-
+    const dir = path.dirname(normalized);
     const readDir = isDir ? path.join(dir, base) : dir;
 
     return fs
