@@ -5,6 +5,7 @@ import type { ResponseItem } from "openai/resources/responses/responses";
 
 import TerminalChat from "./components/chat/terminal-chat";
 import TerminalChatPastRollout from "./components/chat/terminal-chat-past-rollout";
+import { EnhancedTerminalChat } from "./components/enhanced-terminal-chat";
 import { checkInGit } from "./utils/check-in-git";
 import { onExit } from "./utils/terminal";
 import { CLI_VERSION } from "./version";
@@ -25,6 +26,7 @@ type Props = {
   approvalPolicy: ApprovalPolicy;
   additionalWritableRoots: ReadonlyArray<string>;
   fullStdout: boolean;
+  enhancedUi?: boolean;
 };
 
 export default function App({
@@ -35,6 +37,7 @@ export default function App({
   approvalPolicy,
   additionalWritableRoots,
   fullStdout,
+  enhancedUi,
 }: Props): JSX.Element {
   const app = useApp();
   const [accepted, setAccepted] = useState(() => false);
@@ -92,6 +95,19 @@ export default function App({
           />
         </Box>
       </Box>
+    );
+  }
+
+  if (enhancedUi) {
+    return (
+      <EnhancedTerminalChat
+        config={config}
+        prompt={prompt}
+        imagePaths={imagePaths}
+        approvalPolicy={approvalPolicy}
+        additionalWritableRoots={additionalWritableRoots}
+        fullStdout={fullStdout}
+      />
     );
   }
 

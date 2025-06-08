@@ -278,7 +278,7 @@ export class WebSearchEngine {
     }));
   }
 
-  private async searchDuckDuckGo(query: string, options: WebSearchOptions): Promise<Array<WebSearchResult>> {
+  private async searchDuckDuckGo(query: string, _options: WebSearchOptions): Promise<Array<WebSearchResult>> {
     // Note: DuckDuckGo doesn't have an official API, so this is a simplified implementation
     // In a real implementation, you might use a proxy service or scraping approach
     

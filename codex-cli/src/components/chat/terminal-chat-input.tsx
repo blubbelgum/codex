@@ -55,7 +55,7 @@ export default function TerminalChatInput({
   openHelpOverlay,
   openDiffOverlay,
   openSessionsOverlay,
-  openAgenticOverlay,
+
   onCompact,
   interruptAgent,
   active,
@@ -80,7 +80,7 @@ export default function TerminalChatInput({
   openHelpOverlay: () => void;
   openDiffOverlay: () => void;
   openSessionsOverlay: () => void;
-  openAgenticOverlay: () => void;
+
   onCompact: () => void;
   interruptAgent: () => void;
   active: boolean;
@@ -272,53 +272,66 @@ export default function TerminalChatInput({
             return;
           }
           if (_key.return) {
-            // Execute the currently selected slash command
             const selIdx = selectedSlashSuggestion;
             const cmdObj = matches[selIdx];
             if (cmdObj) {
               const cmd = cmdObj.command;
-              setInput("");
-              setDraftInput("");
-              setSelectedSlashSuggestion(0);
-              switch (cmd) {
-                case "/history":
-                  openOverlay();
-                  break;
-                case "/sessions":
-                  openSessionsOverlay();
-                  break;
-                case "/help":
-                  openHelpOverlay();
-                  break;
-                case "/compact":
-                  onCompact();
-                  break;
-                case "/model":
-                  openModelOverlay();
-                  break;
-                case "/approval":
-                  openApprovalOverlay();
-                  break;
-                case "/diff":
-                  openDiffOverlay();
-                  break;
-                case "/tools":
-                  openAgenticOverlay();
-                  break;
-                case "/bug":
-                  onSubmit(cmd);
-                  break;
-                case "/clear":
-                  onSubmit(cmd);
-                  break;
-                case "/clearhistory":
-                  onSubmit(cmd);
-                  break;
-                case "/search":
-                  onSubmit(cmd);
-                  break;
-                default:
-                  break;
+              const currentInput = input.trim();
+              
+              // If the current input exactly matches the selected command, execute it
+              if (currentInput === cmd) {
+                setInput("");
+                setDraftInput("");
+                setSelectedSlashSuggestion(0);
+                switch (cmd) {
+                  case "/history":
+                    openOverlay();
+                    break;
+                  case "/sessions":
+                    openSessionsOverlay();
+                    break;
+                  case "/help":
+                    openHelpOverlay();
+                    break;
+                  case "/compact":
+                    onCompact();
+                    break;
+                  case "/model":
+                    openModelOverlay();
+                    break;
+                  case "/approval":
+                    openApprovalOverlay();
+                    break;
+                  case "/diff":
+                    openDiffOverlay();
+                    break;
+                  case "/bug":
+                    onSubmit(cmd);
+                    break;
+                  case "/clear":
+                    onSubmit(cmd);
+                    break;
+                  case "/clearhistory":
+                    onSubmit(cmd);
+                    break;
+                  case "/search":
+                    onSubmit(cmd);
+                    break;
+                  case "/task":
+                    onSubmit(cmd);
+                    break;
+                  default:
+                    break;
+                }
+              } else {
+                // If it's a partial match, complete it first (like tab does)
+                setInput(cmd);
+                setDraftInput(cmd);
+                // Update the editor to show the completion
+                setEditorState((s) => ({
+                  key: s.key + 1,
+                  initialCursorOffset: cmd.length,
+                }));
               }
             }
             return;
@@ -778,6 +791,62 @@ export default function TerminalChatInput({
          }
         
         return;
+      } else if (inputValue.startsWith("/task ")) {
+        // Handle /task command locally
+        setInput("");
+        
+        const { handleTaskCommand } = await import("../../utils/task-command-handler.js");
+        
+        try {
+          const result = await handleTaskCommand(inputValue);
+          
+          setItems((prev) => [
+            ...prev,
+            {
+              id: `task-result-${Date.now()}`,
+              type: "message",
+              role: "system",
+              content: [
+                {
+                  type: "input_text",
+                  text: result.output,
+                },
+              ],
+            },
+          ]);
+          
+          if (!result.success && result.error) {
+            console.error("Task command error:", result.error);
+          }
+        } catch (error) {
+          setItems((prev) => [
+            ...prev,
+            {
+              id: `task-error-${Date.now()}`,
+              type: "message",
+              role: "system",
+              content: [
+                {
+                  type: "input_text",
+                  text: `❌ Task command failed: ${error instanceof Error ? error.message : 'Unknown error'}`,
+                },
+              ],
+            },
+          ]);
+        }
+        
+        // Add to history
+        const config = loadConfig();
+        if (config.history?.saveHistory) {
+          const updatedHistory = await addToHistory(inputValue, history, {
+            maxSize: config.history?.maxSize ?? 1000,
+            saveHistory: config.history?.saveHistory ?? true,
+            sensitivePatterns: config.history?.sensitivePatterns ?? [],
+          });
+          setHistory(updatedHistory);
+        }
+        
+        return;
       } else if (inputValue.startsWith("/")) {
         // Handle invalid/unrecognized commands. Only single-word inputs starting with '/'
         // (e.g., /command) that are not recognized are caught here. Any other input, including
@@ -785,7 +854,7 @@ export default function TerminalChatInput({
         // and be treated as a regular prompt.
         const trimmed = inputValue.trim();
 
-        if (/^\/\S+$/.test(trimmed) && trimmed !== "/search") {
+        if (/^\/\S+$/.test(trimmed) && trimmed !== "/search" && trimmed !== "/task") {
           setInput("");
           setItems((prev) => [
             ...prev,

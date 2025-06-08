@@ -102,6 +102,9 @@ const cli = meow(
 
     --reasoning <effort>      Set the reasoning effort level (low, medium, high) (default: high)
 
+    --enhanced-ui             Launch with enhanced multi-pane UI featuring task management,
+                              file navigation, and advanced clipboard support
+
   Dangerous options
     --dangerously-auto-approve-everything
                                Skip all confirmation prompts and execute commands without
@@ -192,6 +195,10 @@ const cli = meow(
         description: "Set the reasoning effort level (low, medium, high)",
         choices: ["low", "medium", "high"],
         default: "high",
+      },
+      enhancedUi: {
+        type: "boolean",
+        description: "Launch with enhanced multi-pane UI",
       },
       // Notification
       notify: {
@@ -621,6 +628,7 @@ const instance = render(
     approvalPolicy={approvalPolicy}
     additionalWritableRoots={additionalWritableRoots}
     fullStdout={Boolean(cli.flags.fullStdout)}
+    enhancedUi={Boolean(cli.flags.enhancedUi)}
   />,
   {
     patchConsole: process.env["DEBUG"] ? false : true,

@@ -65,6 +65,9 @@ export default function HelpOverlay({
         <Text>
           <Text color="cyan">/search</Text> – search the web and save results to markdown
         </Text>
+        <Text>
+          <Text color="cyan">/task</Text> – access task management features for project planning
+        </Text>
 
         <Box marginTop={1}>
           <Text bold dimColor>

@@ -169,38 +169,6 @@ development_ that understands and executes your repo.
 
 And it's **fully open-source** so you can see and contribute to how it develops!
 
-## Agentic Tools Interface
-
-Codex includes an advanced agentic tools interface that provides intelligent assistance for project analysis, command composition, and session management. Access these capabilities by typing `/tools` in the interactive REPL or pressing the number keys 1-3.
-
-### Tool Discovery and Project Analysis
-
-The tool discovery system performs context-aware analysis of your codebase to provide intelligent suggestions:
-
-- **Framework Detection**: Automatically identifies React, Vue, Next.js, TypeScript, and other frameworks
-- **Code Quality Analysis**: Analyzes code complexity, test coverage, and potential issues
-- **Dependency Analysis**: Reviews package.json and identifies outdated or vulnerable dependencies
-- **Performance Assessment**: Detects performance bottlenecks and optimization opportunities
-- **Security Scanning**: Identifies potential security vulnerabilities and suggests fixes
-
-### Command Composer
-
-The AI-powered command composer helps you build complex commands with confidence:
-
-- **Step-by-Step Reasoning**: Breaks down complex tasks into logical steps
-- **Risk Assessment**: Evaluates command safety with platform-specific guidance
-- **Time Estimation**: Provides estimated execution duration for operations
-- **Windows Compatibility**: Automatic translation of Unix commands for Windows environments
-- **Command Preview**: Shows exactly what will be executed before running
-
-### Enhanced Approval System
-
-The enhanced approval dialog provides detailed analysis before executing commands:
-
-- **Risk Level Assessment**: Categorizes commands as low, medium, or high risk
-- **Platform-Specific Warnings**: Windows-specific guidance for command translation
-- **Detailed Command Analysis**: Shows potential issues and suggested improvements
-- **Progress Tracking**: Real-time feedback during command execution
 - **Error Prevention**: Identifies common mistakes before execution
 
 ### Session History Management

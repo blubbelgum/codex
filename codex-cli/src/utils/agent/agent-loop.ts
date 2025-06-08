@@ -156,6 +156,77 @@ const webSearchFunctionTool: FunctionTool = {
   },
 };
 
+const taskManagementFunctionTool: FunctionTool = {
+  type: "function",
+  name: "task_management",
+  description:
+    "Manage project tasks and get AI-powered recommendations. Use for task creation, listing, completion tracking, project analysis, and getting next task recommendations.",
+  strict: false,
+  parameters: {
+    type: "object",
+    properties: {
+      action: {
+        type: "string",
+        enum: ["init", "list", "add", "next", "complete", "analyze", "status", "prd", "help"],
+        description: "The task management action to perform",
+      },
+      title: {
+        type: "string",
+        description: "Task title (required for 'add' action)",
+      },
+      description: {
+        type: "string",
+        description: "Task description (optional for 'add' action)",
+      },
+      taskId: {
+        type: "number",
+        description: "Task ID (required for 'complete' and 'status' actions)",
+      },
+      status: {
+        type: "string",
+        enum: ["pending", "in_progress", "completed", "blocked"],
+        description: "New task status (required for 'status' action)",
+      },
+      priority: {
+        type: "string",
+        enum: ["low", "medium", "high", "critical"],
+        description: "Task priority (optional for 'add' action, filter for 'list')",
+      },
+      complexity: {
+        type: "number",
+        minimum: 1,
+        maximum: 10,
+        description: "Task complexity 1-10 (optional for 'add' action)",
+      },
+      tags: {
+        type: "array",
+        items: { type: "string" },
+        description: "Task tags (optional for 'add' action)",
+      },
+      dependencies: {
+        type: "array",
+        items: { type: "number" },
+        description: "Task dependency IDs (optional for 'add' action)",
+      },
+      projectName: {
+        type: "string",
+        description: "Project name (optional for 'init' action)",
+      },
+      filterStatus: {
+        type: "string",
+        enum: ["pending", "in_progress", "completed", "blocked"],
+        description: "Filter tasks by status (optional for 'list' action)",
+      },
+      filterTag: {
+        type: "string",
+        description: "Filter tasks by tag (optional for 'list' action)",
+      },
+    },
+    required: ["action"],
+    additionalProperties: false,
+  },
+};
+
 const localShellTool: Tool = {
   //@ts-expect-error - waiting on sdk
   type: "local_shell",
@@ -498,8 +569,8 @@ export class AgentLoop {
     if (name === "container.exec" || name === "shell") {
       // Use shell-specific parsing for shell/exec commands
       args = parseToolCallArguments(rawArguments ?? "{}");
-    } else if (name === "web_search") {
-      // For web_search, just use the parsed JSON directly
+    } else if (name === "web_search" || name === "task_management") {
+      // For web_search and task_management, just use the parsed JSON directly
       args = parsedArgs;
     } else {
       // For other tools, try shell parsing as fallback
@@ -582,7 +653,7 @@ export class AgentLoop {
       try {
         const startTime = Date.now();
         const webSearchArgs = args as any;
-        const { query, intent = "general", maxResults = 10, timeRange = "all", searchType = "general" } = webSearchArgs;
+        const { query, intent = "general", maxResults = 10, timeRange = "all" } = webSearchArgs;
         
         if (!query || typeof query !== "string") {
           outputItem.output = JSON.stringify({
@@ -618,6 +689,76 @@ export class AgentLoop {
         const duration = (Date.now() - Date.now()) / 1000;
         outputItem.output = JSON.stringify({
           output: `Web search failed: ${error instanceof Error ? error.message : 'Unknown error'}`,
+          metadata: { exit_code: 1, duration_seconds: duration },
+        });
+      }
+    } else if (name === "task_management") {
+      const startTime = Date.now();
+      try {
+        const taskArgs = args as any;
+        
+        if (!taskArgs || typeof taskArgs !== "object") {
+          outputItem.output = JSON.stringify({
+            output: "Error: Invalid task management arguments",
+            metadata: { exit_code: 1, duration_seconds: 0 },
+          });
+        } else {
+          const { action, title, description, taskId, status, priority, projectName, filterStatus, filterTag } = taskArgs;
+        
+          if (!action || typeof action !== "string") {
+          outputItem.output = JSON.stringify({
+            output: "Error: 'action' parameter is required and must be a string",
+            metadata: { exit_code: 1, duration_seconds: 0 },
+          });
+          } else {
+            // Import and use the task command handler
+            const { handleTaskCommand } = await import("../task-command-handler.js");
+          
+            // Build command string based on action and parameters
+            let commandString = `/task ${action}`;
+          
+            switch (action) {
+              case "init":
+                if (projectName) commandString += ` ${projectName}`;
+                break;
+              case "add":
+                if (title) {
+                  commandString += ` "${title}"`;
+                  if (description) commandString += ` ${description}`;
+                }
+                break;
+              case "complete":
+              case "status":
+                if (taskId !== undefined) {
+                  commandString += ` ${taskId}`;
+                  if (action === "status" && status) commandString += ` ${status}`;
+                }
+                break;
+              case "list":
+                if (filterStatus) commandString += ` --status ${filterStatus}`;
+                if (priority) commandString += ` --priority ${priority}`;
+                if (filterTag) commandString += ` --tag ${filterTag}`;
+                break;
+            }
+          
+            const result = await handleTaskCommand(commandString);
+            const duration = (Date.now() - startTime) / 1000;
+
+            outputItem.output = JSON.stringify({
+              output: result.output,
+              metadata: { 
+                exit_code: result.success ? 0 : 1, 
+                duration_seconds: duration,
+                task_count: result.metadata?.task_count,
+                task_id: result.metadata?.task_id,
+              },
+            });
+          }
+        }
+      } catch (error) {
+        const duration = (Date.now() - startTime) / 1000;
+        outputItem.output = JSON.stringify({
+          output: `Task management failed: ${error instanceof Error ? error.message : 'Unknown error'}`,
           metadata: { exit_code: 1, duration_seconds: duration },
         });
       }
@@ -777,12 +918,12 @@ export class AgentLoop {
       // `disableResponseStorage === true`.
       let transcriptPrefixLen = 0;
 
-      let tools: Array<Tool> = [shellFunctionTool, webSearchFunctionTool];
+      let tools: Array<Tool> = [shellFunctionTool, webSearchFunctionTool, taskManagementFunctionTool];
       if (this.model.startsWith("codex")) {
-        tools = [localShellTool, webSearchFunctionTool];
+        tools = [localShellTool, webSearchFunctionTool, taskManagementFunctionTool];
       } else if (this.provider.toLowerCase() === "gemini") {
         // Use standard tools for Gemini with enhanced search capabilities
-        tools = [shellFunctionTool, webSearchFunctionTool];
+        tools = [shellFunctionTool, webSearchFunctionTool, taskManagementFunctionTool];
       }
 
       const stripInternalFields = (
