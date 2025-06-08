@@ -248,9 +248,39 @@ function getFullMessages(
 // Function to convert tools
 function convertTools(
   tools?: ResponseCreateInput["tools"],
-): Array<OpenAI.Chat.Completions.ChatCompletionTool> | undefined {
+): Array<OpenAI.Chat.Completions.ChatCompletionTool> | any[] | undefined {
+  if (!tools) return undefined;
+  
+  // Check if any tool has a type that's not standard OpenAI function tool
+  const hasNonStandardTools = tools.some(tool => {
+    const toolType = (tool as any).type;
+    return toolType === "google_search" || 
+           toolType === "google_search_retrieval" || 
+           toolType === "local_shell";
+  });
+  
+  if (hasNonStandardTools) {
+    // For non-standard tools (like Gemini), return tools as-is for the underlying API
+    return tools.map((tool) => {
+      if (tool.type === "function") {
+        return {
+          type: "function" as const,
+          function: {
+            name: tool.name,
+            description: tool.description || undefined,
+            parameters: tool.parameters,
+          },
+        };
+      } else {
+        // Pass non-standard tools through as-is
+        return tool as any;
+      }
+    });
+  }
+  
+  // For OpenAI and other providers, only process function tools
   return tools
-    ?.filter((tool) => tool.type === "function")
+    .filter((tool) => tool.type === "function")
     .map((tool) => ({
       type: "function" as const,
       function: {
@@ -264,17 +294,11 @@ function convertTools(
 const createCompletion = (openai: OpenAI, input: ResponseCreateInput) => {
   const fullMessages = getFullMessages(input);
   const chatTools = convertTools(input.tools);
-  const webSearchOptions = input.tools?.some(
-    (tool) => tool.type === "function" && tool.name === "web_search",
-  )
-    ? {}
-    : undefined;
 
   const chatInput: OpenAI.Chat.Completions.ChatCompletionCreateParams = {
     model: input.model,
     messages: fullMessages,
     tools: chatTools,
-    web_search_options: webSearchOptions,
     temperature: input.temperature,
     top_p: input.top_p,
     tool_choice: (input.tool_choice === "auto"

@@ -32,6 +32,7 @@ import {
 } from "../session.js";
 import { applyPatchToolInstructions } from "./apply-patch.js";
 import { handleExecCommand } from "./handle-exec-command.js";
+import { smartWebSearch, formatSearchResults } from "./web-search.js";
 import { HttpsProxyAgent } from "https-proxy-agent";
 import { spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
@@ -115,10 +116,52 @@ const shellFunctionTool: FunctionTool = {
   },
 };
 
+const webSearchFunctionTool: FunctionTool = {
+  type: "function",
+  name: "web_search",
+  description:
+    "Search the web for real-time information, documentation, solutions, and current knowledge. Useful for finding recent information, troubleshooting errors, or getting documentation that may not be in training data.",
+  strict: false,
+  parameters: {
+    type: "object",
+    properties: {
+      query: {
+        type: "string",
+        description: "The search query to find relevant information",
+      },
+      intent: {
+        type: "string",
+        enum: ["research", "troubleshooting", "documentation", "examples", "news", "general"],
+        description: "The intent of the search to optimize results",
+      },
+      maxResults: {
+        type: "number",
+        description: "Maximum number of results to return (default: 10)",
+        minimum: 1,
+        maximum: 20,
+      },
+      timeRange: {
+        type: "string",
+        enum: ["day", "week", "month", "year", "all"],
+        description: "Time range for search results (default: all)",
+      },
+      searchType: {
+        type: "string",
+        enum: ["general", "news", "academic", "code", "documentation"],
+        description: "Type of search to perform (default: general)",
+      },
+    },
+    required: ["query"],
+    additionalProperties: false,
+  },
+};
+
 const localShellTool: Tool = {
   //@ts-expect-error - waiting on sdk
   type: "local_shell",
 };
+
+
 
 export class AgentLoop {
   private model: string;
@@ -442,18 +485,38 @@ export class AgentLoop {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const callId: string = (item as any).call_id ?? (item as any).id;
 
-    const args = parseToolCallArguments(rawArguments ?? "{}");
+    // Parse arguments differently based on the tool type
+    let args: any = null;
+    let parsedArgs: any = null;
+    
+    try {
+      parsedArgs = JSON.parse(rawArguments ?? "{}");
+    } catch {
+      // JSON parsing failed - will be handled below
+    }
+
+    if (name === "container.exec" || name === "shell") {
+      // Use shell-specific parsing for shell/exec commands
+      args = parseToolCallArguments(rawArguments ?? "{}");
+    } else if (name === "web_search") {
+      // For web_search, just use the parsed JSON directly
+      args = parsedArgs;
+    } else {
+      // For other tools, try shell parsing as fallback
+      args = parseToolCallArguments(rawArguments ?? "{}");
+    }
+
     log(
       `handleFunctionCall(): name=${
         name ?? "undefined"
       } callId=${callId} args=${rawArguments}`,
     );
 
-    if (args == null) {
+    // Only apply shell-specific validation to shell commands
+    if ((name === "container.exec" || name === "shell") && args == null) {
       // Provide specific error messages for common mistakes
       let errorMessage = `Invalid command arguments: ${rawArguments}`;
       try {
-        const parsedArgs = JSON.parse(rawArguments ?? "{}");
         if (parsedArgs.patch && !parsedArgs.cmd && !parsedArgs.command) {
           errorMessage = `Error: Found "patch" parameter instead of "cmd". Correct format: {"cmd":["apply_patch", "*** Begin Patch\\n*** Add File: filename\\n+file content\\n*** End Patch"]}`;
         } else if (!parsedArgs.cmd && !parsedArgs.command) {
@@ -514,6 +577,49 @@ export class AgentLoop {
 
       if (additionalItemsFromExec) {
         additionalItems.push(...additionalItemsFromExec);
+      }
+    } else if (name === "web_search") {
+      try {
+        const startTime = Date.now();
+        const webSearchArgs = args as any;
+        const { query, intent = "general", maxResults = 10, timeRange = "all", searchType = "general" } = webSearchArgs;
+        
+        if (!query || typeof query !== "string") {
+          outputItem.output = JSON.stringify({
+            output: "Error: 'query' parameter is required and must be a string",
+            metadata: { exit_code: 1, duration_seconds: 0 },
+          });
+        } else {
+          const results = await smartWebSearch(query, {
+            type: intent === "troubleshooting" ? "error" : 
+                  intent === "documentation" ? "documentation" :
+                  intent === "examples" ? "code" :
+                  intent === "news" ? "news" : "general",
+            timeframe: timeRange === "day" || timeRange === "week" || timeRange === "month" ? "recent" : "all",
+            maxResults,
+            provider: this.provider,
+          });
+
+          const limitedResults = results.slice(0, maxResults);
+          const formattedResults = formatSearchResults(limitedResults);
+          const duration = (Date.now() - startTime) / 1000;
+
+          outputItem.output = JSON.stringify({
+            output: `Found ${limitedResults.length} results:\n\n${formattedResults}`,
+            metadata: { 
+              exit_code: 0, 
+              duration_seconds: duration,
+              results_count: limitedResults.length,
+              search_engine: this.provider === "gemini" ? "gemini_native" : "auto"
+            },
+          });
+        }
+      } catch (error) {
+        const duration = (Date.now() - Date.now()) / 1000;
+        outputItem.output = JSON.stringify({
+          output: `Web search failed: ${error instanceof Error ? error.message : 'Unknown error'}`,
+          metadata: { exit_code: 1, duration_seconds: duration },
+        });
       }
     }
 
@@ -671,9 +777,12 @@ export class AgentLoop {
       // `disableResponseStorage === true`.
       let transcriptPrefixLen = 0;
 
-      let tools: Array<Tool> = [shellFunctionTool];
+      let tools: Array<Tool> = [shellFunctionTool, webSearchFunctionTool];
       if (this.model.startsWith("codex")) {
-        tools = [localShellTool];
+        tools = [localShellTool, webSearchFunctionTool];
+      } else if (this.provider.toLowerCase() === "gemini") {
+        // Use standard tools for Gemini with enhanced search capabilities
+        tools = [shellFunctionTool, webSearchFunctionTool];
       }
 
       const stripInternalFields = (

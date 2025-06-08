@@ -62,6 +62,9 @@ export default function HelpOverlay({
         <Text>
           <Text color="cyan">/compact</Text> – condense context into a summary
         </Text>
+        <Text>
+          <Text color="cyan">/search</Text> – search the web and save results to markdown
+        </Text>
 
         <Box marginTop={1}>
           <Text bold dimColor>

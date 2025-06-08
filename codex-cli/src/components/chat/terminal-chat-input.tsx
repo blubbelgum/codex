@@ -314,6 +314,9 @@ export default function TerminalChatInput({
                 case "/clearhistory":
                   onSubmit(cmd);
                   break;
+                case "/search":
+                  onSubmit(cmd);
+                  break;
                 default:
                   break;
               }
@@ -645,6 +648,136 @@ export default function TerminalChatInput({
         }
 
         return;
+      } else if (inputValue.startsWith("/search ")) {
+        // Handle /search command with hybrid approach: Gemini native search + AI summarization
+        setInput("");
+        
+        const { parseSearchCommand, executeHybridSearch, generateSummarizationPrompt } = await import("../../utils/search-command-handler.js");
+        const searchOptions = parseSearchCommand(inputValue);
+        
+        if (searchOptions) {
+          try {
+            // Show that search is starting
+            setItems((prev) => [
+              ...prev,
+              {
+                id: `search-start-${Date.now()}`,
+                type: "message",
+                role: "system",
+                content: [
+                  {
+                    type: "input_text",
+                    text: `🔍 Searching for "${searchOptions.query}" using Gemini native Google Search...`,
+                  },
+                ],
+              },
+            ]);
+
+            // Execute hybrid search: Gemini API for search, then AI for processing
+            const { searchResults, errorMessage } = await executeHybridSearch(searchOptions, "gemini");
+            
+            if (errorMessage) {
+              setItems((prev) => [
+                ...prev,
+                {
+                  id: `search-error-${Date.now()}`,
+                  type: "message",
+                  role: "system",
+                  content: [
+                    {
+                      type: "input_text",
+                      text: `❌ Search failed: ${errorMessage}`,
+                    },
+                  ],
+                },
+              ]);
+            } else if (searchResults.length === 0) {
+              setItems((prev) => [
+                ...prev,
+                {
+                  id: `search-no-results-${Date.now()}`,
+                  type: "message",
+                  role: "system",
+                  content: [
+                    {
+                      type: "input_text",
+                      text: `No search results found for "${searchOptions.query}"`,
+                    },
+                  ],
+                },
+              ]);
+            } else {
+              // Generate AI prompt for summarization and processing
+              const summarizationPrompt = generateSummarizationPrompt(
+                searchOptions.query, 
+                searchResults, 
+                searchOptions.saveToFile
+              );
+              
+              setItems((prev) => [
+                ...prev,
+                {
+                  id: `search-results-${Date.now()}`,
+                  type: "message",
+                  role: "system",
+                  content: [
+                    {
+                      type: "input_text",
+                      text: `✅ Found ${searchResults.length} results. Processing and summarizing...`,
+                    },
+                  ],
+                },
+              ]);
+
+              // Submit the summarization prompt to the AI
+              const inputItem = await createInputItem(summarizationPrompt, []);
+              submitInput([inputItem]);
+            }
+          } catch (error) {
+            setItems((prev) => [
+              ...prev,
+              {
+                id: `search-error-${Date.now()}`,
+                type: "message",
+                role: "system",
+                content: [
+                  {
+                    type: "input_text",
+                    text: `❌ Search execution failed: ${error instanceof Error ? error.message : 'Unknown error'}`,
+                  },
+                ],
+              },
+            ]);
+          }
+        } else {
+          setItems((prev) => [
+            ...prev,
+            {
+              id: `search-error-${Date.now()}`,
+              type: "message",
+              role: "system",
+              content: [
+                {
+                  type: "input_text",
+                  text: "Invalid search command. Usage: /search <query> [save to filename.md]",
+                },
+              ],
+            },
+          ]);
+        }
+        
+                 // Add to history
+         const config = loadConfig();
+         if (config.history?.saveHistory) {
+           const updatedHistory = await addToHistory(inputValue, history, {
+             maxSize: config.history?.maxSize ?? 1000,
+             saveHistory: config.history?.saveHistory ?? true,
+             sensitivePatterns: config.history?.sensitivePatterns ?? [],
+           });
+           setHistory(updatedHistory);
+         }
+        
+        return;
       } else if (inputValue.startsWith("/")) {
         // Handle invalid/unrecognized commands. Only single-word inputs starting with '/'
         // (e.g., /command) that are not recognized are caught here. Any other input, including
@@ -652,7 +785,7 @@ export default function TerminalChatInput({
         // and be treated as a regular prompt.
         const trimmed = inputValue.trim();
 
-        if (/^\/\S+$/.test(trimmed)) {
+        if (/^\/\S+$/.test(trimmed) && trimmed !== "/search") {
           setInput("");
           setItems((prev) => [
             ...prev,

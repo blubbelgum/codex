@@ -38,4 +38,8 @@ export const SLASH_COMMANDS: Array<SlashCommand> = [
     description:
       "Open agentic tool palette for smart command suggestions and project analysis",
   },
+  {
+    command: "/search",
+    description: "Search the web for information and optionally save results to markdown file",
+  },
 ];

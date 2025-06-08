@@ -3,8 +3,6 @@ import type { CommandConfirmation } from "../../utils/agent/agent-loop.js";
 import type { ResponseFunctionToolCall } from "openai/resources/responses/responses.mjs";
 
 import CommandPreview from "./command-preview.js";
-import ProgressIndicator from "./progress-indicator.js";
-import { useProgressTracker } from "../../hooks/useProgressTracker.js";
 import { ReviewDecision } from "../../utils/agent/review.js";
 import { ErrorSuggestionEngine } from "../../utils/error-suggestions.js";
 import { Box, Text, useInput } from "ink";
@@ -25,7 +23,6 @@ export default function EnhancedApprovalDialog({
 }: EnhancedApprovalDialogProps): React.ReactElement {
   const [showDetails, setShowDetails] = useState(false);
   const [explanation, setExplanation] = useState("");
-  const progressTracker = useProgressTracker();
 
   // Create a mock function call for analysis
   const mockFunctionCall: ResponseFunctionToolCall = {
@@ -53,31 +50,6 @@ export default function EnhancedApprovalDialog({
     }
   }, [autoApprove, isHighRisk, onDecision, applyPatch]);
 
-  useEffect(() => {
-    // Set up progress tracking
-    progressTracker.addStep(
-      "analyze",
-      "Analyzing command",
-      "Checking for potential issues",
-    );
-    progressTracker.addStep(
-      "review",
-      "Awaiting approval",
-      "User review required",
-    );
-
-    progressTracker.startStep("analyze");
-    progressTracker.completeStep(
-      "analyze",
-      `${analysis.suggestions.length} suggestions found`,
-    );
-    progressTracker.startStep("review");
-
-    return () => {
-      progressTracker.reset();
-    };
-  }, [analysis.suggestions.length, progressTracker]);
-
   useInput((input, key) => {
     if (key.escape) {
       onDecision({
@@ -89,7 +61,6 @@ export default function EnhancedApprovalDialog({
 
     switch (input.toLowerCase()) {
       case "y":
-        progressTracker.completeStep("review", "Approved by user");
         onDecision({
           review: ReviewDecision.YES,
           applyPatch,
@@ -97,14 +68,12 @@ export default function EnhancedApprovalDialog({
         });
         break;
       case "n":
-        progressTracker.errorStep("review", "Denied by user");
         onDecision({
           review: ReviewDecision.NO_CONTINUE,
           explanation: explanation || "Denied by user",
         });
         break;
       case "s":
-        progressTracker.errorStep("review", "Skipped by user");
         onDecision({
           review: ReviewDecision.NO_CONTINUE,
           explanation: explanation || "Skipped by user",
@@ -129,7 +98,6 @@ export default function EnhancedApprovalDialog({
       <Box flexDirection="column" padding={1}>
         <Text color="green">🤖 Auto-approving command...</Text>
         <CommandPreview command={mockFunctionCall} />
-        <ProgressIndicator steps={progressTracker.steps} compact={true} />
       </Box>
     );
   }
@@ -226,10 +194,6 @@ export default function EnhancedApprovalDialog({
             <Text color="red">Please review carefully before approving.</Text>
           </Box>
         )}
-      </Box>
-
-      <Box marginTop={1}>
-        <ProgressIndicator steps={progressTracker.steps} compact={true} />
       </Box>
     </Box>
   );

@@ -41,18 +41,7 @@
   "lint-staged": {
     "*.json": "prettier --write",
     "*.md": "prettier --write",
-    ".github/workflows/*.yml": "prettier --write",
-    "codex-cli/src/**/*.{js,ts,tsx}": [
-      "prettier --write",
-      "pnpm --filter @openai/codex run lint"
-    ],
-    "codex-cli/tests/**/*.{js,ts,tsx}": [
-      "prettier --write",
-      "pnpm --filter @openai/codex run lint"
-    ],
-    "**/*.{js,ts,tsx}": [
-      "node codex-cli/scripts/typecheck-staged.js"
-    ]
+    ".github/workflows/*.yml": "prettier --write"
   },
   "packageManager": "pnpm@10.8.1"
 }

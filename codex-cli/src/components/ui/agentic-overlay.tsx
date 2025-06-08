@@ -1,6 +1,5 @@
 import type { ToolSuggestion } from "../../utils/agent/tool-discovery.js";
 
-import CommandComposer from "./command-composer.js";
 import ToolPalette from "./tool-palette.js";
 import { CodeIntelligenceEngine } from "../../utils/agent/code-intelligence.js";
 import { AgenticToolDiscovery } from "../../utils/agent/tool-discovery.js";
@@ -22,7 +21,7 @@ export default function AgenticOverlay({
   onClose,
   onSuggestionAccept,
 }: AgenticOverlayProps): React.ReactElement {
-  const [mode, setMode] = useState<"tools" | "composer" | "analysis">("tools");
+  const [mode, setMode] = useState<"tools" | "analysis">("tools");
   const [suggestions, setSuggestions] = useState<Array<ToolSuggestion>>([]);
   const [contextAnalysis, setContextAnalysis] = useState<string>("");
   const [isLoading, setIsLoading] = useState(false);
@@ -75,14 +74,6 @@ export default function AgenticOverlay({
     onSuggestionAccept?.(tool);
   };
 
-  const handleCommandComposerExecute = (steps: Array<{ command?: string }>) => {
-    steps.forEach((step) => {
-      if (step.command) {
-        onExecuteCommand?.(step.command);
-      }
-    });
-  };
-
   useInput((input, key) => {
     if (!isVisible) {
       return;
@@ -97,8 +88,6 @@ export default function AgenticOverlay({
     if (input === "1") {
       setMode("tools");
     } else if (input === "2") {
-      setMode("composer");
-    } else if (input === "3") {
       setMode("analysis");
     }
   });
@@ -133,16 +122,10 @@ export default function AgenticOverlay({
           [1] 🔧 Tool Palette
         </Text>
         <Text
-          color={mode === "composer" ? "cyan" : "gray"}
-          bold={mode === "composer"}
-        >
-          [2] 📝 Command Composer
-        </Text>
-        <Text
           color={mode === "analysis" ? "cyan" : "gray"}
           bold={mode === "analysis"}
         >
-          [3] 📊 Code Analysis
+          [2] 📊 Code Analysis
         </Text>
       </Box>
 
@@ -163,17 +146,6 @@ export default function AgenticOverlay({
             userQuery={userQuery}
             onToolSelect={handleToolSelect}
             onClose={() => onClose?.()}
-          />
-        );
-
-      case "composer":
-        return (
-          <CommandComposer
-            isVisible={true}
-            initialQuery={userQuery}
-            suggestions={suggestions}
-            onExecute={handleCommandComposerExecute}
-            onCancel={() => onClose?.()}
           />
         );
 
@@ -215,7 +187,7 @@ export default function AgenticOverlay({
 
             <Box marginTop={1}>
               <Text dimColor>
-                Press [1] or [2] to access tools • ESC to close
+                Press [1] for tools • ESC to close
               </Text>
             </Box>
           </Box>
@@ -229,7 +201,7 @@ export default function AgenticOverlay({
       {renderContent()}
 
       <Box marginTop={1}>
-        <Text dimColor>ESC: Close • 1-3: Switch modes</Text>
+        <Text dimColor>ESC: Close • 1-2: Switch modes</Text>
       </Box>
     </Box>
   );

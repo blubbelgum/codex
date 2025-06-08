@@ -2,6 +2,7 @@ import { log } from "../logger/log.js";
 import fs from "fs";
 import { spawnSync } from "node:child_process";
 import path from "path";
+import { smartWebSearch, formatSearchResults } from "./web-search.js";
 
 export interface ToolSuggestion {
   id: string;
@@ -33,6 +34,53 @@ export interface ProjectContext {
   securityIssues: Array<string>;
   performanceIssues: Array<string>;
 }
+
+const toolCategories = {
+  development: {
+    "web-search-docs": {
+      name: "Search Documentation Online",
+      description: "Find official documentation and guides for technologies",
+      reason: "Get up-to-date documentation that might not be in the AI's training data",
+      confidence: 0.85,
+      command: "search-docs",
+      category: "development" as const,
+    },
+    "web-search-code": {
+      name: "Search Code Examples",
+      description: "Find code examples and tutorials from GitHub, Stack Overflow",
+      reason: "Discover real-world implementations and solutions",
+      confidence: 0.82,
+      command: "search-code",
+      category: "development" as const,
+    },
+    "web-search-troubleshoot": {
+      name: "Search Error Solutions",
+      description: "Find solutions for specific errors and issues",
+      reason: "Get community solutions for debugging problems",
+      confidence: 0.88,
+      command: "search-error",
+      category: "development" as const,
+    },
+  },
+  analysis: {
+    "web-search-research": {
+      name: "Research Technology Trends",
+      description: "Find recent articles, research, and industry trends",
+      reason: "Stay current with latest developments and best practices",
+      confidence: 0.75,
+      command: "search-research",
+      category: "analysis" as const,
+    },
+    "web-search-news": {
+      name: "Technology News Search",
+      description: "Find recent news, updates, and releases",
+      reason: "Get the latest information about technologies and tools",
+      confidence: 0.78,
+      command: "search-news",
+      category: "analysis" as const,
+    },
+  },
+};
 
 export class AgenticToolDiscovery {
   private projectRoot: string;
@@ -183,6 +231,10 @@ export class AgenticToolDiscovery {
         reason: "Performance issues detected in project analysis",
       });
     }
+
+    // Add web search suggestions
+    const webSearchSuggestions = this.getWebSearchSuggestions(userQuery || "");
+    suggestions.push(...webSearchSuggestions);
 
     return suggestions.sort((a, b) => b.confidence - a.confidence);
   }
@@ -413,5 +465,104 @@ export class AgenticToolDiscovery {
     }
 
     return suggestions;
+  }
+
+  private getWebSearchSuggestions(query: string): Array<ToolSuggestion> {
+    const suggestions: Array<ToolSuggestion> = [];
+    const lowerQuery = query.toLowerCase();
+
+    // Documentation search triggers
+    if (this.matchesPatterns(lowerQuery, [
+      /how to use/,
+      /documentation for/,
+      /guide for/,
+      /api reference/,
+      /docs for/,
+      /manual for/,
+    ])) {
+      suggestions.push({
+        id: "web-search-docs",
+        ...toolCategories.development["web-search-docs"],
+        command: `search-docs "${query}"`,
+        confidence: 0.88,
+      });
+    }
+
+    // Code examples search triggers
+    if (this.matchesPatterns(lowerQuery, [
+      /example/,
+      /sample code/,
+      /tutorial/,
+      /how to implement/,
+      /show me code/,
+      /code for/,
+    ])) {
+      suggestions.push({
+        id: "web-search-code",
+        ...toolCategories.development["web-search-code"],
+        command: `search-code "${query}"`,
+        confidence: 0.85,
+      });
+    }
+
+    // Error/troubleshooting search triggers
+    if (this.matchesPatterns(lowerQuery, [
+      /error/,
+      /fix/,
+      /broken/,
+      /not working/,
+      /issue with/,
+      /problem/,
+      /debug/,
+      /troubleshoot/,
+    ])) {
+      suggestions.push({
+        id: "web-search-troubleshoot",
+        ...toolCategories.development["web-search-troubleshoot"],
+        command: `search-error "${query}"`,
+        confidence: 0.90,
+      });
+    }
+
+    // Research search triggers
+    if (this.matchesPatterns(lowerQuery, [
+      /latest/,
+      /new features/,
+      /comparison/,
+      /best practices/,
+      /trends/,
+      /analysis/,
+      /research/,
+    ])) {
+      suggestions.push({
+        id: "web-search-research",
+        ...toolCategories.analysis["web-search-research"],
+        command: `search-research "${query}"`,
+        confidence: 0.75,
+      });
+    }
+
+    // News search triggers
+    if (this.matchesPatterns(lowerQuery, [
+      /news/,
+      /updates/,
+      /release/,
+      /announcement/,
+      /what's new/,
+      /recent changes/,
+    ])) {
+      suggestions.push({
+        id: "web-search-news",
+        ...toolCategories.analysis["web-search-news"],
+        command: `search-news "${query}"`,
+        confidence: 0.80,
+      });
+    }
+
+    return suggestions;
+  }
+
+  private matchesPatterns(text: string, patterns: RegExp[]): boolean {
+    return patterns.some(pattern => pattern.test(text));
   }
 }
