@@ -29,6 +29,8 @@ import App from "./app";
 import { runSinglePass } from "./cli-singlepass";
 import SessionsOverlay from "./components/sessions-overlay.js";
 import { AgentLoop } from "./utils/agent/agent-loop";
+import { createRolloutAwareAgentLoop } from "./utils/agent/rollout-agent-loop";
+import { RolloutReplay } from "./utils/rollout-replay";
 import { ReviewDecision } from "./utils/agent/review";
 import { AutoApprovalMode } from "./utils/auto-approval-mode";
 import { checkForUpdates } from "./utils/check-updates";
@@ -102,8 +104,7 @@ const cli = meow(
 
     --reasoning <effort>      Set the reasoning effort level (low, medium, high) (default: high)
 
-    --enhanced-ui             Launch with enhanced multi-pane UI featuring task management,
-                              file navigation, and advanced clipboard support
+
 
   Dangerous options
     --dangerously-auto-approve-everything
@@ -196,10 +197,7 @@ const cli = meow(
         choices: ["low", "medium", "high"],
         default: "high",
       },
-      enhancedUi: {
-        type: "boolean",
-        description: "Launch with enhanced multi-pane UI",
-      },
+
       // Notification
       notify: {
         type: "boolean",
@@ -401,8 +399,11 @@ if (cli.flags.free) {
 // Set of providers that don't require API keys
 const NO_API_KEY_REQUIRED = new Set(["ollama"]);
 
-// Skip API key validation for providers that don't require an API key
-if (!apiKey && !NO_API_KEY_REQUIRED.has(provider.toLowerCase())) {
+// Check if we should use rollout replay mode (skip API key validation in this case)
+const useReplay = RolloutReplay.shouldUseReplay();
+
+// Skip API key validation for providers that don't require an API key or when in replay mode
+if (!apiKey && !NO_API_KEY_REQUIRED.has(provider.toLowerCase()) && !useReplay) {
   // Get the expected environment variable name from providers config
   const { providers } = await import("./utils/providers.js");
   const providerConfig = providers[provider.toLowerCase()];
@@ -482,6 +483,7 @@ if (config.flexMode) {
 }
 
 if (
+  !useReplay &&
   !(await isModelSupportedForResponses(provider, config.model)) &&
   (!provider || provider.toLowerCase() === "openai")
 ) {
@@ -628,7 +630,6 @@ const instance = render(
     approvalPolicy={approvalPolicy}
     additionalWritableRoots={additionalWritableRoots}
     fullStdout={Boolean(cli.flags.fullStdout)}
-    enhancedUi={Boolean(cli.flags.enhancedUi)}
   />,
   {
     patchConsole: process.env["DEBUG"] ? false : true,
@@ -698,7 +699,42 @@ async function runQuietMode({
   additionalWritableRoots: ReadonlyArray<string>;
   config: AppConfig;
 }): Promise<void> {
-  const agent = new AgentLoop({
+  // Check if we should use rollout replay mode
+  const useReplay = RolloutReplay.shouldUseReplay();
+  
+  if (useReplay) {
+    console.log('🎬 [Rollout Replay] Detected test environment - using rollout replay mode');
+  }
+
+  const agent = useReplay ? createRolloutAwareAgentLoop({
+    model: config.model,
+    config: config,
+    instructions: config.instructions || '',
+    provider: config.provider || 'openai',
+    approvalPolicy,
+    additionalWritableRoots,
+    disableResponseStorage: config.disableResponseStorage || false,
+    onItem: (item: ResponseItem) => {
+      // eslint-disable-next-line no-console
+      console.log(formatResponseItemForQuietMode(item));
+    },
+    onLoading: () => {
+      /* intentionally ignored in quiet mode */
+    },
+    getCommandConfirmation: (
+      _command: Array<string>,
+    ): Promise<CommandConfirmation> => {
+      // In quiet mode, default to NO_CONTINUE, except when in full-auto mode
+      const reviewDecision =
+        approvalPolicy === AutoApprovalMode.FULL_AUTO
+          ? ReviewDecision.YES
+          : ReviewDecision.NO_CONTINUE;
+      return Promise.resolve({ review: reviewDecision });
+    },
+    onLastResponseId: () => {
+      /* intentionally ignored in quiet mode */
+    },
+  }) : new AgentLoop({
     model: config.model,
     config: config,
     instructions: config.instructions,

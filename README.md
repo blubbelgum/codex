@@ -29,6 +29,7 @@
   - [Agentic Tools Shortcuts](#agentic-tools-shortcuts)
 - [Memory & project docs](#memory--project-docs)
 - [Non-interactive / CI mode](#non-interactive--ci-mode)
+- [Rollout Replay System](#rollout-replay-system)
 - [Tracing / verbose logging](#tracing--verbose-logging)
 - [Recipes](#recipes)
   - [Basic Commands](#basic-commands)
@@ -153,6 +154,8 @@ That's it - Codex will scaffold a file, run it inside a sandbox, install any
 missing dependencies, and show you the live result. Approve the changes and
 they'll be committed to your working directory.
 
+**💡 Testing Tip:** Set any API key to `"test_key"` to enable rollout replay mode, which replays previous sessions without consuming API credits - perfect for testing and development!
+
 ---
 
 ## Why Codex?
@@ -170,6 +173,7 @@ development_ that understands and executes your repo.
 And it's **fully open-source** so you can see and contribute to how it develops!
 
 - **Error Prevention**: Identifies common mistakes before execution
+- **Enhanced File Preview**: Advanced code viewing with syntax highlighting and developer tools
 
 ### Session History Management
 
@@ -189,6 +193,57 @@ View and manage your past Codex sessions:
 | **Session History**  | `3`             | View and manage past Codex sessions                 |
 
 All agentic features integrate seamlessly with the existing approval modes and security model, maintaining the same sandboxing and permission controls.
+
+### Enhanced File Preview System
+
+The enhanced file preview provides a professional code viewing experience with advanced developer features:
+
+#### Full Preview Mode
+
+- **Toggle**: Press `f` to enter full preview mode, hiding the file navigator for maximum code viewing space
+- **Breadcrumbs**: Shows file path navigation in full preview mode
+- **Exit**: Press `f` again to return to split view
+
+#### Advanced Navigation
+
+- **In-File Search**: Press `Ctrl+F` to search within the current file with real-time highlighting
+- **Go to Line**: Press `g` followed by a line number to jump directly to specific lines
+- **Search Navigation**: Use `n` and `N` to navigate between search results
+- **Zoom Control**: Use `+`, `-`, and `0` to increase, decrease, or reset font size
+
+#### Syntax Highlighting
+
+- **JavaScript/TypeScript**: Keywords, strings, numbers, and comments with appropriate colors
+- **JSON**: Property names and values with distinct highlighting
+- **Markdown**: Headers, code blocks, and formatting with visual emphasis
+- **CSS**: Selectors, properties, and values with color coding
+
+#### Developer Features
+
+- **Git Integration**: File status indicators showing modified, added, deleted, or untracked files
+- **Line Numbers**: Toggle with `l` key for precise code navigation
+- **Word Wrap**: Toggle with `w` key for handling long lines
+- **Performance Optimization**: Smart caching and efficient rendering for large files
+
+#### File Operations
+
+- **Reload**: Press `r` to refresh file content from disk
+- **Cache Management**: Press `c` to clear file cache
+- **Visual Indicators**: Cache hit status and file size information
+
+#### Keyboard Shortcuts Reference
+
+| Key             | Action                      |
+| --------------- | --------------------------- |
+| `f`             | Toggle full preview mode    |
+| `Ctrl+F`        | Start in-file search        |
+| `n` / `N`       | Next/Previous search result |
+| `g` + number    | Go to specific line         |
+| `+` / `-` / `0` | Zoom in/out/reset           |
+| `w`             | Toggle word wrap            |
+| `l`             | Toggle line numbers         |
+| `r`             | Reload file                 |
+| `c`             | Clear cache                 |
 
 ---
 
@@ -301,6 +356,98 @@ Run Codex head-less in pipelines. Example GitHub Action step:
 
 Set `CODEX_QUIET_MODE=1` to silence interactive UI noise.
 
+---
+
+## Rollout Replay System
+
+The rollout replay system enables testing and development without consuming API credits by replaying previously recorded AI sessions. This feature is particularly useful for:
+
+- **Testing and debugging** without API costs
+- **Reproducible development** using real session data
+- **Demonstration and training** with consistent outputs
+- **CI/CD pipelines** that need deterministic behavior
+
+### How It Works
+
+Codex automatically records all interactions in rollout JSON files (format: `rollout-YYYY-MM-DD-{session-id}.json`). The replay system can load these files and recreate the exact same AI behavior, including:
+
+- All function calls (shell commands, file operations, etc.)
+- Realistic command outputs and responses
+- Progress tracking and session metadata
+- Support for all approval modes
+
+### Activation Methods
+
+The rollout replay mode activates automatically when:
+
+1. **Test Environment Detection**: Any API key is set to `"test_key"`
+
+   ```bash
+   export GEMINI_API_KEY="test_key"
+   codex "create a simple website"
+   ```
+
+2. **Force Replay Mode**: Set the environment variable (works with any API key)
+   ```bash
+   export CODEX_FORCE_REPLAY=1
+   codex "replay this session"
+   ```
+
+### File Discovery
+
+The system automatically searches for rollout files in this order:
+
+1. Current working directory (`./rollout-*.json`)
+2. Parent directories (traversing upward)
+3. Codex CLI directory (`codex-cli/rollout-*.json`)
+
+### Session Information
+
+During replay, you'll see session metadata:
+
+```
+🎬 [RolloutAgentLoop] Replay mode activated
+🎬 [RolloutAgentLoop] Starting replay session...
+📅 Session: 850cc2e4-60fb-4468-b349-ed921ae4e17d (2025-06-09T04:38:29.893Z)
+```
+
+### Usage Examples
+
+**Basic Testing:**
+
+```bash
+# Set any provider API key to "test_key" to activate replay
+export OPENAI_API_KEY="test_key"
+codex "create a React app"
+```
+
+**CI/CD Integration:**
+
+```bash
+# Force replay mode for reproducible testing
+export CODEX_FORCE_REPLAY=1
+export OPENAI_API_KEY="test_key"
+codex --quiet --full-auto "run comprehensive tests"
+```
+
+**Interactive Development:**
+
+```bash
+# Test new features without API calls
+export GEMINI_API_KEY="test_key"
+codex  # Interactive mode with replay
+```
+
+### Benefits
+
+- **Zero API Costs**: No real API calls are made during replay
+- **Deterministic Output**: Same input always produces identical results
+- **Real Session Data**: Uses actual AI responses from previous sessions
+- **Full Functionality**: Works with all CLI features and approval modes
+- **Seamless Integration**: No changes needed to existing commands or workflows
+
+The rollout replay system maintains the same user experience as normal operation while providing a cost-effective way to test, develop, and demonstrate Codex CLI functionality.
+
 ## Tracing / verbose logging
 
 Setting the environment variable `DEBUG=true` prints full API request and response details:
@@ -326,16 +473,17 @@ Below are a few bite-size examples you can copy-paste. Replace the text in quote
 | 5   | `codex "Explain what this regex does: ^(?=.*[A-Z]).{8,}$"`                      | Outputs a step-by-step human explanation.                                  |
 | 6   | `codex "Carefully review this repo, and propose 3 high impact well-scoped PRs"` | Suggests impactful PRs in the current codebase.                            |
 | 7   | `codex "Look for vulnerabilities and create a security review report"`          | Finds and explains security bugs.                                          |
+| 8   | `GEMINI_API_KEY="test_key" codex "create a todo app"`                           | Replays a previous session without consuming API credits.                  |
 
 ### Agentic Tools Examples
 
 | #   | What you type                    | What happens                                                                                 |
 | --- | -------------------------------- | -------------------------------------------------------------------------------------------- |
-| 8   | `/tools` then browse suggestions | Opens intelligent tool palette with context-aware recommendations for your project           |
-| 9   | Press `2` for Command Composer   | AI guides you through building complex commands with safety analysis                         |
-| 10  | Press `3` for Session History    | Browse previous Codex sessions with metadata and resumption options                          |
-| 11  | `/tools` in a React project      | Shows React-specific tools like component analysis, hook optimization, and testing utilities |
-| 12  | Command Composer for deployment  | Breaks down deployment into steps with risk assessment and timing estimates                  |
+| 9   | `/tools` then browse suggestions | Opens intelligent tool palette with context-aware recommendations for your project           |
+| 10  | Press `2` for Command Composer   | AI guides you through building complex commands with safety analysis                         |
+| 11  | Press `3` for Session History    | Browse previous Codex sessions with metadata and resumption options                          |
+| 12  | `/tools` in a React project      | Shows React-specific tools like component analysis, hook optimization, and testing utilities |
+| 13  | Command Composer for deployment  | Breaks down deployment into steps with risk assessment and timing estimates                  |
 
 ---
 

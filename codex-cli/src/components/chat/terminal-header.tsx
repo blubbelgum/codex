@@ -35,6 +35,7 @@ export interface TerminalHeaderProps {
   agent?: AgentLoop;
   initialImagePaths?: Array<string>;
   flexModeEnabled?: boolean;
+  showTabInfo?: boolean;
 }
 
 const TerminalHeader: React.FC<TerminalHeaderProps> = ({
@@ -48,6 +49,7 @@ const TerminalHeader: React.FC<TerminalHeaderProps> = ({
   agent,
   initialImagePaths,
   flexModeEnabled = false,
+  showTabInfo = false,
 }) => {
   return (
     <>
@@ -58,6 +60,7 @@ const TerminalHeader: React.FC<TerminalHeaderProps> = ({
           {provider}) -{" "}
           <Text color={colorsByPolicy[approvalPolicy]}>{approvalPolicy}</Text>
           {flexModeEnabled ? " - flex-mode" : ""}
+          {showTabInfo ? " | [1] Chat [2] Files [3] Tasks" : ""}
         </Text>
       ) : (
         <>
@@ -119,6 +122,14 @@ const TerminalHeader: React.FC<TerminalHeaderProps> = ({
                 <Text bold>{path.basename(img)}</Text>
               </Text>
             ))}
+            {showTabInfo && (
+              <Text dimColor>
+                <Text color="blueBright">↳</Text> tabs:{" "}
+                <Text bold color="cyan">[1] Chat</Text>{" "}
+                <Text bold color="yellow">[2] Files</Text>{" "}
+                <Text bold color="green">[3] Tasks</Text>
+              </Text>
+            )}
           </Box>
         </>
       )}

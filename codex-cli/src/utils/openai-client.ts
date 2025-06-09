@@ -8,6 +8,7 @@ import {
   OPENAI_ORGANIZATION,
   OPENAI_PROJECT,
 } from "./config.js";
+import { RolloutReplay } from "./rollout-replay.js";
 import OpenAI, { AzureOpenAI } from "openai";
 
 type OpenAIClientConfig = {
@@ -24,6 +25,15 @@ type OpenAIClientConfig = {
 export function createOpenAIClient(
   config: OpenAIClientConfig | AppConfig,
 ): OpenAI | AzureOpenAI {
+  // In replay mode, return a mock client to avoid API key issues
+  if (RolloutReplay.shouldUseReplay()) {
+    return new OpenAI({
+      apiKey: "test_key", // Use dummy API key for replay mode
+      baseURL: getBaseUrl(config.provider),
+      timeout: OPENAI_TIMEOUT_MS,
+    });
+  }
+
   const headers: Record<string, string> = {};
   if (OPENAI_ORGANIZATION) {
     headers["OpenAI-Organization"] = OPENAI_ORGANIZATION;

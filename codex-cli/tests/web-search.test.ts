@@ -142,16 +142,15 @@ describe("WebSearchEngine", () => {
       expect(results).toHaveLength(0);
     });
 
-    it("should throw error when Google API key is missing", async () => {
+    it("should return empty array when Google API key is missing", async () => {
       const engine = new WebSearchEngine(undefined, "google");
       const query: WebSearchQuery = {
         query: "test query",
         intent: "general",
       };
 
-      await expect(engine.search(query)).rejects.toThrow(
-        "Google Custom Search API key required",
-      );
+      const results = await engine.search(query);
+      expect(results).toEqual([]);
     });
   });
 
@@ -215,16 +214,15 @@ describe("WebSearchEngine", () => {
       expect(results).toHaveLength(0);
     });
 
-    it("should throw error when Bing API key is missing", async () => {
+    it("should return empty array when Bing API key is missing", async () => {
       const engine = new WebSearchEngine(undefined, "bing");
       const query: WebSearchQuery = {
         query: "test query",
         intent: "general",
       };
 
-      await expect(engine.search(query)).rejects.toThrow(
-        "Bing Search API key required",
-      );
+      const results = await engine.search(query);
+      expect(results).toEqual([]);
     });
   });
 

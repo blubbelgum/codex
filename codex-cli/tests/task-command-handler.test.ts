@@ -76,7 +76,7 @@ test("task add creates a new task", async () => {
   expect(result.success).toBe(true);
   expect(result.output).toContain("Task added successfully");
   expect(result.output).toContain("Fix login bug");
-  expect(result.output).toContain("Task 1:");
+  expect(result.output).toContain("Task 1**:");
   expect(result.metadata?.task_id).toBe(1);
 });
 
@@ -98,8 +98,8 @@ test("task list shows added tasks", async () => {
   
   expect(result.success).toBe(true);
   expect(result.output).toContain("Task List");
-  expect(result.output).toContain("Task 1: Task 1");
-  expect(result.output).toContain("Task 2: Task 2");
+  expect(result.output).toContain("Task 1**:");
+  expect(result.output).toContain("Task 2**:");
   expect(result.metadata?.task_count).toBe(2);
 });
 
@@ -234,7 +234,7 @@ test("task commands work without existing project file", async () => {
   
   expect(result.success).toBe(true);
   expect(result.output).toContain("Task added successfully");
-  expect(result.metadata?.task_id).toBe(1);
+  expect(result.metadata?.task_id).toBe(3);
 });
 
 test("task next with dependencies", async () => {

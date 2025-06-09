@@ -13,7 +13,9 @@ import { formatCommandForDisplay } from "../../format-command.js";
 import { useConfirmation } from "../../hooks/use-confirmation.js";
 import { useTerminalSize } from "../../hooks/use-terminal-size.js";
 import { AgentLoop } from "../../utils/agent/agent-loop.js";
+import { createRolloutAwareAgentLoop, RolloutAgentLoop } from "../../utils/agent/rollout-agent-loop.js";
 import { ReviewDecision } from "../../utils/agent/review.js";
+import { RolloutReplay } from "../../utils/rollout-replay.js";
 import { generateCompactSummary } from "../../utils/compact-summary.js";
 import { saveConfig } from "../../utils/config.js";
 import { extractAppliedPatches as _extractAppliedPatches } from "../../utils/extract-applied-patches.js";
@@ -35,10 +37,13 @@ import HelpOverlay from "../help-overlay.js";
 import HistoryOverlay from "../history-overlay.js";
 import ModelOverlay from "../model-overlay.js";
 import SessionsOverlay from "../sessions-overlay.js";
+import { FileNavigator } from "../ui/file-navigator.js";
+import { FilePreview } from "../ui/file-preview.js";
+import { TaskPanel } from "../ui/task-panel.js";
 
 import chalk from "chalk";
 import fs from "fs/promises";
-import { Box, Text } from "ink";
+import { Box, Text, useInput } from "ink";
 import { spawn } from "node:child_process";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { inspect } from "util";
@@ -50,7 +55,9 @@ export type OverlayModeType =
   | "model"
   | "approval"
   | "help"
-  | "diff";
+  | "diff"
+  | "files"
+  | "tasks";
 
 type Props = {
   config: AppConfig;
@@ -198,6 +205,9 @@ export default function TerminalChat({
   } = useConfirmation();
   const [overlayMode, setOverlayMode] = useState<OverlayModeType>("none");
   const [viewRollout, setViewRollout] = useState<AppRollout | null>(null);
+  const [selectedFile, setSelectedFile] = useState<string | null>(null);
+  const [filesPaneFocus, setFilesPaneFocus] = useState<'navigator' | 'preview'>('navigator');
+  const [fullPreviewMode, setFullPreviewMode] = useState(false);
 
   // Store the diff text when opening the diff overlay so the view isn’t
   // recomputed on every re‑render while it is open.
@@ -212,9 +222,44 @@ export default function TerminalChat({
 
   const PWD = React.useMemo(() => shortCwd(), []);
 
+  // Handle keyboard shortcuts for tabs
+  useInput((input, key) => {
+    if (!loading) {
+      if (input === '1') {
+        setOverlayMode("none"); // Return to chat
+        setFilesPaneFocus('navigator'); // Reset focus
+        setFullPreviewMode(false); // Reset full preview mode
+      } else if (input === '2') {
+        setOverlayMode("files");
+        setFilesPaneFocus('navigator'); // Start with navigator focus
+        setFullPreviewMode(false); // Start in split view mode
+      } else if (input === '3') {
+        setOverlayMode("tasks");
+      } else if (overlayMode === "files" && key.tab) {
+        // Tab key switches focus between navigator and preview in files mode
+        setFilesPaneFocus(prev => prev === 'navigator' ? 'preview' : 'navigator');
+      } else if (overlayMode === "files" && filesPaneFocus === 'preview' && key.backspace) {
+        // Backspace in preview mode goes back to navigator
+        setFilesPaneFocus('navigator');
+      } else if (overlayMode === "files" && key.escape) {
+        // Escape in files mode exits to chat
+        setOverlayMode("none");
+        setFilesPaneFocus('navigator');
+        setFullPreviewMode(false);
+      } else if (overlayMode === "files" && input === 'b') {
+        // 'b' key goes back to file navigator (browse mode)
+        setFullPreviewMode(false);
+        setFilesPaneFocus('navigator');
+      }
+    }
+  }, { 
+    // Only handle input when not in an overlay that has its own input handling
+    isActive: overlayMode === "none" || overlayMode === "files" || overlayMode === "tasks"
+  });
+
   // Keep a single AgentLoop instance alive across renders;
   // recreate only when model/instructions/approvalPolicy change.
-  const agentRef = React.useRef<AgentLoop>();
+  const agentRef = React.useRef<AgentLoop | RolloutAgentLoop>();
   const [, forceUpdate] = React.useReducer((c) => c + 1, 0); // trigger re‑render
 
   // ────────────────────────────────────────────────────────────────
@@ -233,18 +278,83 @@ export default function TerminalChat({
       return;
     }
 
+    // Check if we should use rollout replay mode
+    const useReplay = RolloutReplay.shouldUseReplay();
+    
+    if (useReplay) {
+      log("🎬 [Rollout Replay] Detected test environment - using rollout replay mode");
+    }
+
     log("creating NEW AgentLoop");
     log(
       `model=${model} provider=${provider} instructions=${Boolean(
         config.instructions,
-      )} approvalPolicy=${approvalPolicy}`,
+      )} approvalPolicy=${approvalPolicy} useReplay=${useReplay}`,
     );
 
     // Tear down any existing loop before creating a new one.
     agentRef.current?.terminate();
 
     const sessionId = crypto.randomUUID();
-    agentRef.current = new AgentLoop({
+    agentRef.current = useReplay ? createRolloutAwareAgentLoop({
+      model,
+      provider,
+      config,
+      instructions: config.instructions || '',
+      approvalPolicy,
+      disableResponseStorage: config.disableResponseStorage || false,
+      additionalWritableRoots,
+      onLastResponseId: setLastResponseId,
+      onItem: (item) => {
+        log(`onItem: ${JSON.stringify(item)}`);
+        setItems((prev) => {
+          const updated = uniqueById([...prev, item as ResponseItem]);
+          saveRollout(sessionId, updated);
+          return updated;
+        });
+      },
+      onLoading: () => setLoading(true),
+      getCommandConfirmation: async (
+        command: Array<string>,
+      ): Promise<CommandConfirmation> => {
+        log(`getCommandConfirmation: ${command}`);
+        const commandForDisplay = formatCommandForDisplay(command);
+
+        // First request for confirmation
+        let { decision: review, customDenyMessage } = await requestConfirmation(
+          <TerminalChatToolCallCommand commandForDisplay={commandForDisplay} />,
+        );
+
+        // If the user wants an explanation, generate one and ask again.
+        if (review === ReviewDecision.EXPLAIN) {
+          log(`Generating explanation for command: ${commandForDisplay}`);
+          const explanation = await generateCommandExplanation(
+            command,
+            model,
+            Boolean(config.flexMode),
+            config,
+          );
+          log(`Generated explanation: ${explanation}`);
+
+          // Ask for confirmation again, but with the explanation.
+          const confirmResult = await requestConfirmation(
+            <TerminalChatToolCallCommand
+              commandForDisplay={commandForDisplay}
+              explanation={explanation}
+            />,
+          );
+
+          // Update the decision based on the second confirmation.
+          review = confirmResult.decision;
+          customDenyMessage = confirmResult.customDenyMessage;
+
+          // Return the final decision with the explanation.
+          return { review, customDenyMessage, explanation };
+        }
+
+        return { review, customDenyMessage };
+      },
+    }) : new AgentLoop({
       model,
       provider,
       config,
@@ -496,6 +606,7 @@ export default function TerminalChat({
               agent,
               initialImagePaths,
               flexModeEnabled: Boolean(config.flexMode),
+              showTabInfo: true,
             }}
             fileOpener={config.fileOpener}
           />
@@ -761,6 +872,91 @@ export default function TerminalChat({
             diffText={diffText}
             onExit={() => setOverlayMode("none")}
           />
+        )}
+
+        {overlayMode === "files" && (
+          <Box flexDirection="column">
+            <Box borderStyle="single" paddingX={2} height={4}>
+              <Box flexDirection="row">
+                <Text color="gray">[1] Chat</Text>
+                <Box marginLeft={2}>
+                  <Text color="cyan" bold>[2] Files</Text>
+                </Box>
+                <Box marginLeft={2}>
+                  <Text color="gray">[3] Tasks</Text>
+                </Box>
+                <Box flexGrow={1} />
+                <Text color="gray" dimColor>Press 1-3 to switch | Tab: switch panes | b: browse files | Esc: close</Text>
+              </Box>
+              <Box marginTop={1}>
+                <Text color="yellow" dimColor>
+                  {fullPreviewMode ? 
+                    'Full Preview Mode - Press b to browse files | f: toggle | Ctrl+F: search | g: goto line' :
+                    `Focus: ${filesPaneFocus === 'navigator' ? 'Navigator (↑/↓ to browse, Enter to select)' : 'Preview (↑/↓ to scroll, f: full preview)'}`
+                  }
+                </Text>
+              </Box>
+            </Box>
+            {fullPreviewMode ? (
+              // Full preview mode - hide navigator, show only preview
+              <Box flexGrow={1}>
+                <FilePreview
+                  filePath={selectedFile}
+                  isActive={true}
+                  height={27}
+                  width={process.stdout.columns || 120}
+                  fullPreview={true}
+                  onToggleFullPreview={() => setFullPreviewMode(false)}
+                />
+              </Box>
+            ) : (
+              // Split view mode - navigator and preview side by side
+              <Box flexDirection="row" flexGrow={1}>
+                <Box width="50%" borderRight borderColor="gray">
+                  <FileNavigator
+                    onFileSelect={(filePath) => {
+                      setSelectedFile(filePath);
+                      setFilesPaneFocus('preview'); // Switch focus to preview when file is selected
+                      setFullPreviewMode(true); // Switch to full preview mode when file is selected
+                    }}
+                    isActive={filesPaneFocus === 'navigator'}
+                    height={25}
+                  />
+                </Box>
+                <Box width="50%">
+                  <FilePreview
+                    filePath={selectedFile}
+                    isActive={filesPaneFocus === 'preview'}
+                    height={25}
+                    width={Math.floor(process.stdout.columns ? process.stdout.columns / 2 : 60)}
+                    fullPreview={false}
+                    onToggleFullPreview={() => setFullPreviewMode(true)}
+                  />
+                </Box>
+              </Box>
+            )}
+          </Box>
+        )}
+
+        {overlayMode === "tasks" && (
+          <Box flexDirection="column">
+            <Box borderStyle="single" paddingX={2} height={3}>
+              <Text color="gray">[1] Chat</Text>
+              <Box marginLeft={2}>
+                <Text color="gray">[2] Files</Text>
+              </Box>
+              <Box marginLeft={2}>
+                <Text color="cyan" bold>[3] Tasks</Text>
+              </Box>
+              <Box flexGrow={1} />
+              <Text color="gray" dimColor>Press 1-3 to switch | Esc to close</Text>
+            </Box>
+            <TaskPanel
+              onTaskSelect={() => {}}
+              isActive={true}
+              height={25}
+            />
+          </Box>
         )}
 
 

@@ -21,7 +21,9 @@
     "build": "node build.mjs",
     "build:dev": "NODE_ENV=development node build.mjs --dev && NODE_OPTIONS=--enable-source-maps node dist/cli-dev.js",
     "stage-release": "node scripts/stage_release.js",
-    "stage-release-bash": "./scripts/stage_release.sh"
+    "stage-release-bash": "./scripts/stage_release.sh",
+    "e2e:demo": "node test-e2e-simulator.js",
+    "e2e:test": "node test-e2e-simulator.js demo"
   },
   "files": [
     "bin",

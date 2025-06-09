@@ -4,6 +4,7 @@ import { approximateTokensUsed } from "./approximate-tokens-used.js";
 import { getApiKey } from "./config.js";
 import { type SupportedModelId, openAiModelInfo } from "./model-info.js";
 import { createOpenAIClient } from "./openai-client.js";
+import { RolloutReplay } from "./rollout-replay.js";
 
 const MODEL_LIST_TIMEOUT_MS = 2_000; // 2 seconds
 export const RECOMMENDED_MODELS: Array<string> = ["o4-mini", "o3"];
@@ -16,6 +17,11 @@ export const RECOMMENDED_MODELS: Array<string> = ["o4-mini", "o3"];
  * lifetime of the process and the results are cached for subsequent calls.
  */
 async function fetchModels(provider: string): Promise<Array<string>> {
+  // In replay mode, return a mock model list to avoid API key issues
+  if (RolloutReplay.shouldUseReplay()) {
+    return ["gemini-2.5-flash-preview-05-20", "gpt-4o", "o1", "o3"]; // Mock model list
+  }
+
   // If the user has not configured an API key we cannot retrieve the models.
   if (!getApiKey(provider)) {
     throw new Error("No API key configured for provider: " + provider);

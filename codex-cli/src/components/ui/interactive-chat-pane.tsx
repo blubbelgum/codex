@@ -3,8 +3,9 @@ import { Box, Text, useInput } from 'ink';
 import TextInput from '../vendor/ink-text-input';
 import Spinner from '../vendor/ink-spinner';
 import type { ResponseItem } from 'openai/resources/responses/responses.mjs';
-import { SelectableText } from './selectable-text.js';
+import { VirtualChatRenderer } from './virtual-chat-renderer.js';
 import { createMockAgent } from '../../utils/mock-agent.js';
+import { memoryManager } from '../../utils/memory-manager.js';
 
 interface ChatMessage {
   id: string;
@@ -26,6 +27,7 @@ export function InteractiveChatPane({ isActive, height, width }: InteractiveChat
   const [showInput, setShowInput] = useState(true);
   const [scrollOffset, setScrollOffset] = useState(0);
   const [autoScroll, setAutoScroll] = useState(true);
+  const [performanceMode, setPerformanceMode] = useState(false);
   const mockAgent = useRef(createMockAgent({
     onItem: handleAgentItem,
     onLoading: setIsLoading,
@@ -43,7 +45,11 @@ export function InteractiveChatPane({ isActive, height, width }: InteractiveChat
       timestamp: new Date(),
     };
 
-    setMessages(prev => [...prev, newMessage]);
+    setMessages(prev => {
+      const updated = [...prev, newMessage];
+      // Apply memory management for large message histories
+      return memoryManager.optimizeChatMessages(updated);
+    });
   }
 
   function formatResponseItem(item: ResponseItem): string {
@@ -76,57 +82,6 @@ export function InteractiveChatPane({ isActive, height, width }: InteractiveChat
     return Math.min(lines + headerHeight + paddingHeight, 15); // Max 15 lines per message
   };
 
-  // Calculate which messages should be visible
-  const calculateVisibleMessages = () => {
-    const maxVisibleHeight = height - 6; // Account for header, input, help
-    let currentHeight = 0;
-    let startIndex = 0;
-    let endIndex = messages.length;
-
-    // If auto-scroll is enabled, start from the bottom
-    if (autoScroll) {
-      for (let i = messages.length - 1; i >= 0; i--) {
-        const message = messages[i];
-        if (!message) continue;
-        const msgHeight = getMessageHeight(message);
-        if (currentHeight + msgHeight > maxVisibleHeight) {
-          startIndex = i + 1;
-          break;
-        }
-        currentHeight += msgHeight;
-      }
-    } else {
-      // Use scroll offset for manual scrolling
-      let skippedHeight = 0;
-      for (let i = 0; i < messages.length; i++) {
-        const message = messages[i];
-        if (!message) continue;
-        const msgHeight = getMessageHeight(message);
-        if (skippedHeight >= scrollOffset) {
-          startIndex = i;
-          break;
-        }
-        skippedHeight += msgHeight;
-      }
-
-      currentHeight = 0;
-      for (let i = startIndex; i < messages.length; i++) {
-        const message = messages[i];
-        if (!message) continue;
-        const msgHeight = getMessageHeight(message);
-        if (currentHeight + msgHeight > maxVisibleHeight) {
-          endIndex = i;
-          break;
-        }
-        currentHeight += msgHeight;
-      }
-    }
-
-    return messages.slice(startIndex, endIndex);
-  };
-
-  const visibleMessages = calculateVisibleMessages();
-
   const handleSubmit = useCallback(async () => {
     if (!input.trim() || isLoading) return;
     
@@ -144,7 +99,7 @@ export function InteractiveChatPane({ isActive, height, width }: InteractiveChat
         content: `Error: ${error instanceof Error ? error.message : 'Unknown error'}`,
         timestamp: new Date(),
       };
-      setMessages(prev => [...prev, errorMessage]);
+      setMessages(prev => memoryManager.optimizeChatMessages([...prev, errorMessage]));
     } finally {
       setShowInput(true);
     }
@@ -183,8 +138,21 @@ export function InteractiveChatPane({ isActive, height, width }: InteractiveChat
       // Ctrl+End to jump to bottom
       setAutoScroll(true);
       setScrollOffset(0);
+    } else if (input === 'p') {
+      // Toggle performance mode
+      setPerformanceMode(!performanceMode);
+    } else if (input === 'm') {
+      // Show memory stats
+      const stats = memoryManager.getStats();
+      const memoryMessage: ChatMessage = {
+        id: `memory-${Date.now()}`,
+        type: 'assistant',
+        content: `Memory Stats:\n- Chat messages: ${messages.length}\n- File cache: ${stats.fileCache.size}/${stats.fileCache.maxSize}\n- Directory cache: ${stats.directoryCache.size}/${stats.directoryCache.maxSize}`,
+        timestamp: new Date(),
+      };
+      setMessages(prev => [...prev, memoryMessage]);
     }
-  });
+  }, { isActive });
 
   // Auto-scroll when new messages arrive (only if auto-scroll is enabled)
   useEffect(() => {
@@ -193,12 +161,14 @@ export function InteractiveChatPane({ isActive, height, width }: InteractiveChat
     }
   }, [messages.length, autoScroll]);
 
-  // Truncate long content for display
-  const truncateContent = (content: string, maxLines: number = 12): string => {
-    const lines = content.split('\n');
-    if (lines.length <= maxLines) return content;
-    return lines.slice(0, maxLines).join('\n') + '\n... (content truncated, scroll to see more)';
-  };
+  // Enable performance mode for large message histories
+  useEffect(() => {
+    if (messages.length > 100 && !performanceMode) {
+      setPerformanceMode(true);
+    }
+  }, [messages.length, performanceMode]);
+
+  const maxVisibleHeight = height - 6; // Account for header, input, help
 
   return (
     <Box flexDirection="column" height={height} width={width}>
@@ -210,11 +180,12 @@ export function InteractiveChatPane({ isActive, height, width }: InteractiveChat
         <Box flexGrow={1} />
         <Text color="gray" dimColor>
           {messages.length > 0 && `${messages.length} msgs`}
+          {performanceMode && ' | Perf'}
           {!autoScroll && ' | Manual'}
         </Text>
       </Box>
 
-      {/* Messages area */}
+      {/* Messages area with virtual rendering */}
       <Box 
         flexDirection="column" 
         flexGrow={1} 
@@ -226,43 +197,13 @@ export function InteractiveChatPane({ isActive, height, width }: InteractiveChat
         paddingX={1}
         overflowY="hidden"
       >
-        {visibleMessages.length === 0 ? (
-          <Box justifyContent="center" alignItems="center" flexGrow={1}>
-            <Box flexDirection="column" alignItems="center">
-              <Text color="cyan" bold>Mock AI Ready!</Text>
-              <Text color="gray" dimColor>test_key mode</Text>
-              <Text color="yellow">Try: "explain this codebase"</Text>
-            </Box>
-          </Box>
-        ) : (
-          visibleMessages.map((message) => {
-            const displayContent = truncateContent(message.content);
-            return (
-              <Box key={message.id} flexDirection="column" marginBottom={1}>
-                <Box>
-                  <Text color={
-                    message.type === 'user' ? 'blue' :
-                    message.type === 'function_call' ? 'yellow' :
-                    message.type === 'function_output' ? 'green' :
-                    'white'
-                  }>
-                    {message.type === 'user' ? 'You' :
-                     message.type === 'function_call' ? 'Shell' :
-                     message.type === 'function_output' ? 'Output' :
-                     'Assistant'}
-                  </Text>
-                  <Box flexGrow={1} />
-                  <Text color="gray" dimColor>
-                    {message.timestamp.toLocaleTimeString()}
-                  </Text>
-                </Box>
-                <SelectableText isActive={isActive}>
-                  {displayContent}
-                </SelectableText>
-              </Box>
-            );
-          })
-        )}
+        <VirtualChatRenderer
+          messages={messages}
+          scrollOffset={scrollOffset}
+          maxVisibleHeight={maxVisibleHeight}
+          isActive={isActive}
+          maxLines={performanceMode ? 8 : 12}
+        />
       </Box>
 
       {/* Input area */}
@@ -308,7 +249,7 @@ export function InteractiveChatPane({ isActive, height, width }: InteractiveChat
       {isActive && (
         <Box paddingX={1} justifyContent="center" height={1} flexShrink={0}>
           <Text color="gray" dimColor>
-            Arrows: Scroll | PgUp/Dn: Fast | Ctrl+End: Bottom | Enter: Send
+            Arrows: Scroll | PgUp/Dn: Fast | p: Perf mode | m: Memory | Enter: Send
           </Text>
         </Box>
       )}

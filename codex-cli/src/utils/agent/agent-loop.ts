@@ -20,6 +20,7 @@ import {
   getBaseUrl,
   AZURE_OPENAI_API_VERSION,
 } from "../config.js";
+import { RolloutReplay } from "../rollout-replay.js";
 import { log } from "../logger/log.js";
 import { parseToolCallArguments } from "../parsers.js";
 import { responsesCreateViaChatCompletions } from "../responses.js";
@@ -461,6 +462,9 @@ export class AgentLoop {
     const apiKey = this.config.apiKey ?? process.env["OPENAI_API_KEY"] ?? "";
     const baseURL = getBaseUrl(this.provider);
 
+    // In replay mode, use a dummy API key to avoid validation errors
+    const effectiveApiKey = RolloutReplay.shouldUseReplay() ? "test_key" : apiKey;
+
     this.oai = new OpenAI({
       // The OpenAI JS SDK only requires `apiKey` when making requests against
       // the official API.  When running unit‑tests we stub out all network
@@ -468,7 +472,7 @@ export class AgentLoop {
       // the property if we actually have a value to avoid triggering runtime
       // errors inside the SDK (it validates that `apiKey` is a non‑empty
       // string when the field is present).
-      ...(apiKey ? { apiKey } : {}),
+      ...(effectiveApiKey ? { apiKey: effectiveApiKey } : {}),
       baseURL,
       defaultHeaders: {
         originator: ORIGIN,
@@ -485,7 +489,7 @@ export class AgentLoop {
 
     if (this.provider.toLowerCase() === "azure") {
       this.oai = new AzureOpenAI({
-        apiKey,
+        apiKey: effectiveApiKey,
         baseURL,
         apiVersion: AZURE_OPENAI_API_VERSION,
         defaultHeaders: {

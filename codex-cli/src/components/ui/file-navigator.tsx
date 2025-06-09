@@ -31,6 +31,7 @@ export function FileNavigator({
   const [currentPath, setCurrentPath] = useState(initialPath);
   const [files, setFiles] = useState<FileItem[]>([]);
   const [selectedIndex, setSelectedIndex] = useState(0);
+  const [scrollOffset, setScrollOffset] = useState(0);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showHiddenFiles, setShowHiddenFiles] = useState(showHidden);
@@ -89,6 +90,7 @@ export function FileNavigator({
 
       setFiles(fileItems);
       setSelectedIndex(0);
+      setScrollOffset(0);
       setCurrentPath(dirPath);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load directory');
@@ -106,10 +108,26 @@ export function FileNavigator({
   useInput((input, key) => {
     if (!isActive) return;
 
+    const visibleHeight = height - 4; // Account for header, path, and footer
+
     if (key.upArrow) {
-      setSelectedIndex(prev => Math.max(0, prev - 1));
+      setSelectedIndex(prev => {
+        const newIndex = Math.max(0, prev - 1);
+        // Adjust scroll if selection goes above visible area
+        if (newIndex < scrollOffset) {
+          setScrollOffset(newIndex);
+        }
+        return newIndex;
+      });
     } else if (key.downArrow) {
-      setSelectedIndex(prev => Math.min(files.length - 1, prev + 1));
+      setSelectedIndex(prev => {
+        const newIndex = Math.min(files.length - 1, prev + 1);
+        // Adjust scroll if selection goes below visible area
+        if (newIndex >= scrollOffset + visibleHeight) {
+          setScrollOffset(newIndex - visibleHeight + 1);
+        }
+        return newIndex;
+      });
     } else if (key.return) {
       const selectedFile = files[selectedIndex];
       if (selectedFile) {
@@ -125,6 +143,21 @@ export function FileNavigator({
       if (parentPath !== currentPath) {
         loadDirectory(parentPath);
       }
+    } else if (key.pageUp) {
+      // Page up
+      setSelectedIndex(prev => {
+        const newIndex = Math.max(0, prev - visibleHeight);
+        setScrollOffset(Math.max(0, newIndex - Math.floor(visibleHeight / 2)));
+        return newIndex;
+      });
+    } else if (key.pageDown) {
+      // Page down
+      setSelectedIndex(prev => {
+        const newIndex = Math.min(files.length - 1, prev + visibleHeight);
+        const maxScroll = Math.max(0, files.length - visibleHeight);
+        setScrollOffset(Math.min(maxScroll, newIndex - Math.floor(visibleHeight / 2)));
+        return newIndex;
+      });
     } else if (input === 'h') {
       // Toggle hidden files
       setShowHiddenFiles(!showHiddenFiles);
@@ -145,12 +178,19 @@ export function FileNavigator({
     }
   }, { isActive });
 
-  // Ensure selected index is within bounds
+  // Ensure selected index is within bounds and adjust scroll
   useEffect(() => {
     if (selectedIndex >= files.length) {
       setSelectedIndex(Math.max(0, files.length - 1));
     }
-  }, [files.length, selectedIndex]);
+    
+    // Ensure scroll offset is valid
+    const visibleHeight = height - 4;
+    const maxScroll = Math.max(0, files.length - visibleHeight);
+    if (scrollOffset > maxScroll) {
+      setScrollOffset(maxScroll);
+    }
+  }, [files.length, selectedIndex, scrollOffset, height]);
 
   const formatFileSize = (bytes?: number): string => {
     if (!bytes) return '';
@@ -213,14 +253,15 @@ export function FileNavigator({
     return files.filter(file => showHiddenFiles || !file.isHidden || file.name === '..');
   }, [files, showHiddenFiles]);
 
-  const displayFiles = visibleFiles.slice(0, height - 4);
+  const visibleHeight = height - 4; // Account for header, path, and footer
+  const displayFiles = visibleFiles.slice(scrollOffset, scrollOffset + visibleHeight);
 
   return (
     <Box flexDirection="column" height={height} borderStyle="round" borderColor="gray">
       {/* Header */}
       <Box justifyContent="space-between" paddingX={1}>
-        <Text bold color="cyan">
-          📂 {path.basename(currentPath) || currentPath}
+        <Text bold color={isActive ? "cyan" : "gray"}>
+          📂 {path.basename(currentPath) || currentPath} {!isActive && '(inactive)'}
         </Text>
         <Text dimColor>
           {visibleFiles.length} items
@@ -245,19 +286,24 @@ export function FileNavigator({
         )}
 
         {!loading && !error && displayFiles.map((file, index) => {
-          const isSelected = index === selectedIndex;
+          const actualIndex = scrollOffset + index;
+          const isSelected = actualIndex === selectedIndex;
           const color = getFileColor(file);
           
-                     return (
-             <Box key={file.path}>
-               <Text color={color} backgroundColor={isSelected ? 'blue' : undefined}>
-                 {getFileIcon(file)} {file.name}
-               </Text>
-               <Text dimColor>
-                 {file.isDirectory ? '' : ` ${formatFileSize(file.size)}`}
-               </Text>
-             </Box>
-           );
+          return (
+            <Box key={file.path}>
+              <Text 
+                color={color} 
+                backgroundColor={isSelected && isActive ? 'blue' : isSelected && !isActive ? 'gray' : undefined}
+                dimColor={!isActive}
+              >
+                {getFileIcon(file)} {file.name}
+              </Text>
+              <Text dimColor>
+                {file.isDirectory ? '' : ` ${formatFileSize(file.size)}`}
+              </Text>
+            </Box>
+          );
         })}
         
         {!loading && !error && visibleFiles.length === 0 && (
@@ -268,9 +314,17 @@ export function FileNavigator({
       {/* Footer controls */}
       {isActive && (
         <Box paddingX={1} borderTop borderColor="gray">
-          <Text dimColor>
-            ↑↓: navigate | Enter: open | u: up | h: hidden | r: refresh | c: copy path | ~: home
-          </Text>
+          <Box flexDirection="row">
+            <Text dimColor>
+              ↑↓: navigate | PgUp/PgDn: page | Enter: open | u: up | h: hidden | r: refresh
+            </Text>
+            <Box flexGrow={1} />
+            {visibleFiles.length > visibleHeight && (
+              <Text dimColor>
+                {scrollOffset + 1}-{Math.min(scrollOffset + visibleHeight, visibleFiles.length)}/{visibleFiles.length}
+              </Text>
+            )}
+          </Box>
         </Box>
       )}
     </Box>
