@@ -325,7 +325,26 @@ export class AgentLoop {
     this.execAbortController?.abort();
 
     // Create a new abort controller for future tool calls
-    this.execAbortController = new AbortController();
+    const newAbortController = new AbortController();
+    
+    // Remove old listener to prevent memory leaks
+    if (this.execAbortController) {
+      // Remove any existing listeners
+      const oldController = this.execAbortController;
+      this.hardAbort.signal.removeEventListener('abort', () => oldController.abort());
+    }
+    
+    this.execAbortController = newAbortController;
+    
+    // Add listener for new controller with proper cleanup
+    const abortHandler = () => {
+      if (this.execAbortController === newAbortController) {
+        this.execAbortController.abort();
+      }
+    };
+    
+    this.hardAbort.signal.addEventListener('abort', abortHandler, { once: true });
+    
     log("AgentLoop.cancel(): execAbortController.abort() called");
 
     // NOTE: We intentionally do *not* clear `lastResponseId` here.  If the
@@ -510,7 +529,11 @@ export class AgentLoop {
     setCurrentModel(this.model);
 
     this.hardAbort = new AbortController();
-
+    
+    // Initialize with an abort controller
+    this.execAbortController = new AbortController();
+    
+    // Single listener that forwards abort signals
     this.hardAbort.signal.addEventListener(
       "abort",
       () => this.execAbortController?.abort(),

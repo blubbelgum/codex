@@ -84,10 +84,30 @@ export function parseToolCallArguments(
 
   const { cmd, command, patch } = json as Record<string, unknown>;
 
-  // Check for common mistake: using "patch" parameter instead of "cmd"
+  // Auto-fix common mistake: using "patch" parameter instead of "cmd"
   if (patch && !cmd && !command) {
     log(
-      `Error: Found "patch" parameter instead of "cmd". Use {"cmd":["apply_patch", "patch_content"]} format. Arguments: ${toolCallArguments}`,
+      `Auto-fixing "patch" parameter to correct "cmd" format. Original arguments: ${toolCallArguments}`,
+    );
+    // Convert {"patch": "content"} to {"cmd": ["apply_patch", "content"]}
+    if (typeof patch === "string") {
+      const fixedJson = { ...json, cmd: ["apply_patch", patch] };
+      const { cmd: fixedCmd } = fixedJson as Record<string, unknown>;
+      const commandArray = toStringArray(fixedCmd);
+      
+      if (commandArray != null && commandArray.length > 0) {
+        // @ts-expect-error timeout and workdir may not exist on json.
+        const { timeout, workdir } = json;
+        return {
+          cmd: commandArray,
+          workdir: typeof workdir === "string" ? workdir : undefined,
+          timeoutInMillis: typeof timeout === "number" ? timeout : undefined,
+        };
+      }
+    }
+    
+    log(
+      `Failed to auto-fix patch parameter format. Arguments: ${toolCallArguments}`,
     );
     return undefined;
   }

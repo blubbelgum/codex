@@ -18,6 +18,15 @@ const COMMAND_MAP: Record<string, { cmd: string; useShell?: boolean }> = {
   touch: { cmd: "echo.", useShell: true },
   mkdir: { cmd: "md", useShell: true },
   pwd: { cmd: "cd", useShell: true },
+  type: { cmd: "type", useShell: true },
+  dir: { cmd: "dir", useShell: true },
+  more: { cmd: "more", useShell: true },
+  del: { cmd: "del", useShell: true },
+  copy: { cmd: "copy", useShell: true },
+  move: { cmd: "move", useShell: true },
+  md: { cmd: "md", useShell: true },
+  rd: { cmd: "rd", useShell: true },
+  ren: { cmd: "ren", useShell: true },
   // Don't adapt echo automatically since it has complex quoting issues
   // Let PowerShell handle it natively
 };
@@ -53,6 +62,7 @@ export function adaptCommandForPlatform(command: Array<string>): Array<string> {
 
   // Nothing to adapt if the command is empty
   if (command.length === 0) {
+    log("adaptCommandForPlatform: Empty command array, returning as-is");
     return command;
   }
 
@@ -60,16 +70,18 @@ export function adaptCommandForPlatform(command: Array<string>): Array<string> {
 
   // If cmd is undefined, empty, or just shell prompts, return original command
   if (!cmd || cmd === "$" || cmd === ">" || cmd === "#") {
+    log(`adaptCommandForPlatform: Invalid command '${cmd}', returning original`);
     return command;
   }
 
   // If the command doesn't need adaptation, return it as is
   const commandMapping = COMMAND_MAP[cmd];
   if (!commandMapping) {
+    log(`adaptCommandForPlatform: No mapping found for '${cmd}', returning original command`);
     return command;
   }
 
-  log(`Adapting command '${cmd}' for Windows platform`);
+  log(`adaptCommandForPlatform: Found mapping for '${cmd}' -> '${commandMapping.cmd}', useShell: ${commandMapping.useShell}`);
 
   // Create a new command array with the adapted command
   let adaptedCommand = [...command];
@@ -81,6 +93,7 @@ export function adaptCommandForPlatform(command: Array<string>): Array<string> {
     for (let i = 1; i < adaptedCommand.length; i++) {
       const option = adaptedCommand[i];
       if (option && optionsForCmd[option]) {
+        log(`adaptCommandForPlatform: Adapting option '${option}' -> '${optionsForCmd[option]}'`);
         adaptedCommand[i] = optionsForCmd[option];
       }
     }
@@ -89,9 +102,10 @@ export function adaptCommandForPlatform(command: Array<string>): Array<string> {
   // If the command needs to be run in shell, wrap it with cmd.exe /c
   if (commandMapping.useShell) {
     adaptedCommand = ["cmd.exe", "/c", ...adaptedCommand];
+    log(`adaptCommandForPlatform: Wrapped with cmd.exe /c: ${adaptedCommand.join(" ")}`);
   }
 
-  log(`Adapted command: ${adaptedCommand.join(" ")}`);
+  log(`adaptCommandForPlatform: Final adapted command: ${adaptedCommand.join(" ")}`);
 
   return adaptedCommand;
 }
