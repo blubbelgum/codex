@@ -35,6 +35,9 @@ export function FileNavigator({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showHiddenFiles, setShowHiddenFiles] = useState(showHidden);
+  // Search state: if true, filter files by searchQuery
+  const [isSearching, setIsSearching] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
   const { copyToClipboard } = useClipboard();
 
   // Load directory contents
@@ -107,6 +110,20 @@ export function FileNavigator({
   // Handle keyboard input
   useInput((input, key) => {
     if (!isActive) return;
+    // Handle search mode input
+    if (isSearching) {
+      if (key.return) {
+        setIsSearching(false);
+      } else if (key.escape) {
+        setIsSearching(false);
+        setSearchQuery('');
+      } else if (key.backspace) {
+        setSearchQuery(q => q.slice(0, -1));
+      } else if (input && input.length === 1 && !key.ctrl && !key.meta) {
+        setSearchQuery(q => q + input);
+      }
+      return;
+    }
 
     const visibleHeight = height - 4; // Account for header, path, and footer
 
@@ -172,6 +189,11 @@ export function FileNavigator({
         // Go to home directory
         const homeDir = process.env['HOME'] || process.env['USERPROFILE'] || '/';
         loadDirectory(homeDir);
+    } else if (input === 's') {
+      // Enter search mode
+      setIsSearching(true);
+      setSearchQuery('');
+      return;
     } else if (input === '/') {
       // Go to root directory
       loadDirectory('/');

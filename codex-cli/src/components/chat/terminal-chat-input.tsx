@@ -55,13 +55,15 @@ export default function TerminalChatInput({
   openHelpOverlay,
   openDiffOverlay,
   openSessionsOverlay,
-  openAgenticOverlay,
+  _openAgenticOverlay,
 
   onCompact,
   interruptAgent,
   active,
   thinkingSeconds,
   items = [],
+  onSwitchToFiles,
+  onSwitchToTasks,
 }: {
   isNew: boolean;
   loading: boolean;
@@ -81,7 +83,7 @@ export default function TerminalChatInput({
   openHelpOverlay: () => void;
   openDiffOverlay: () => void;
   openSessionsOverlay: () => void;
-  openAgenticOverlay: () => void;
+  _openAgenticOverlay: () => void;
 
   onCompact: () => void;
   interruptAgent: () => void;
@@ -89,7 +91,11 @@ export default function TerminalChatInput({
   thinkingSeconds: number;
   // New: current conversation items so we can include them in bug reports
   items?: Array<ResponseItem>;
+  onSwitchToFiles?: () => void;
+  onSwitchToTasks?: () => void;
 }): React.ReactElement {
+  // Track whether the input is focused (allows typing) or unfocused (allows tab switching)
+  const [inputFocused, setInputFocused] = useState(true);
   // Slash command suggestion index
   const [selectedSlashSuggestion, setSelectedSlashSuggestion] =
     useState<number>(0);
@@ -232,6 +238,30 @@ export default function TerminalChatInput({
 
   useInput(
     (_input, _key) => {
+      // Handle escape key to toggle input focus
+      if (_key.escape && !confirmationPrompt && !loading) {
+        setInputFocused(prev => !prev);
+        return;
+      }
+
+      // When unfocused, handle tab switching
+      if (!inputFocused) {
+        if (_input === '2' && onSwitchToFiles) {
+          onSwitchToFiles();
+          return;
+        } else if (_input === '3' && onSwitchToTasks) {
+          onSwitchToTasks();
+          return;
+        }
+        return;
+      }
+
+      // Insert a literal tab character if no slash or filesystem suggestions are active
+      if (_key.tab && !confirmationPrompt && !loading && !input.trim().startsWith("/") && fsSuggestions.length === 0) {
+        setInput(prev => prev + "\t");
+        setDraftInput(prev => prev + "\t");
+        return;
+      }
       // Slash command navigation: up/down to select, enter to fill
       if (!confirmationPrompt && !loading && input.trim().startsWith("/")) {
         const prefix = input.trim();
@@ -970,7 +1000,16 @@ export default function TerminalChatInput({
 
   return (
     <Box flexDirection="column">
-      <Box borderStyle="round">
+      {/* Focus indicator */}
+      <Box paddingX={2} marginBottom={1}>
+        <Text color={inputFocused ? "green" : "yellow"}>
+          {inputFocused ? "● FOCUSED" : "○ UNFOCUSED"} - Chat Input
+        </Text>
+      </Box>
+      <Box 
+        borderStyle="round" 
+        borderColor={inputFocused ? "green" : "gray"}
+      >
         {loading ? (
           <TerminalChatInputThinking
             onInterrupt={interruptAgent}
@@ -992,7 +1031,7 @@ export default function TerminalChatInput({
               initialCursorOffset={editorState.initialCursorOffset}
               initialText={input}
               height={6}
-              focus={active}
+              focus={active && inputFocused}
               onSubmit={(txt) => {
                 // If final token is an @path, replace with filesystem suggestion if available
                 const {
@@ -1062,8 +1101,12 @@ export default function TerminalChatInput({
             displayLimit={5}
           />
         ) : (
-          <Text dimColor>
-            ctrl+c to exit | "/" to see commands | enter to send
+          <Text dimColor={inputFocused}>
+            {inputFocused ? (
+              <>ctrl+c to exit | "/" to see commands | enter to send | <Text color="yellow">esc to unfocus</Text></>
+            ) : (
+              <><Text color="cyan" bold>Press 2/3 to switch tabs</Text> | <Text color="green">esc to focus input</Text></>
+            )}
             {contextLeftPercent > 25 && (
               <>
                 {" — "}

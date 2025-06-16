@@ -13,9 +13,8 @@ import { formatCommandForDisplay } from "../../format-command.js";
 import { useConfirmation } from "../../hooks/use-confirmation.js";
 import { useTerminalSize } from "../../hooks/use-terminal-size.js";
 import { AgentLoop } from "../../utils/agent/agent-loop.js";
-import { createRolloutAwareAgentLoop, RolloutAgentLoop } from "../../utils/agent/rollout-agent-loop.js";
 import { ReviewDecision } from "../../utils/agent/review.js";
-import { RolloutReplay } from "../../utils/rollout-replay.js";
+import { createRolloutAwareAgentLoop, type RolloutAgentLoop } from "../../utils/agent/rollout-agent-loop.js";
 import { generateCompactSummary } from "../../utils/compact-summary.js";
 import { saveConfig } from "../../utils/config.js";
 import { extractAppliedPatches as _extractAppliedPatches } from "../../utils/extract-applied-patches.js";
@@ -28,6 +27,7 @@ import {
   uniqueById,
 } from "../../utils/model-utils.js";
 import { createOpenAIClient } from "../../utils/openai-client.js";
+import { RolloutReplay } from "../../utils/rollout-replay.js";
 import { shortCwd } from "../../utils/short-path.js";
 import { saveRollout } from "../../utils/storage/save-rollout.js";
 import { CLI_VERSION } from "../../version.js";
@@ -40,7 +40,6 @@ import SessionsOverlay from "../sessions-overlay.js";
 import { FileNavigator } from "../ui/file-navigator.js";
 import { FilePreview } from "../ui/file-preview.js";
 import { TaskPanel } from "../ui/task-panel.js";
-
 import chalk from "chalk";
 import fs from "fs/promises";
 import { Box, Text, useInput } from "ink";
@@ -57,6 +56,7 @@ export type OverlayModeType =
   | "help"
   | "diff"
   | "files"
+  | "file-search"
   | "tasks";
 
 type Props = {
@@ -222,14 +222,22 @@ export default function TerminalChat({
 
   const PWD = React.useMemo(() => shortCwd(), []);
 
-  // Handle keyboard shortcuts for tabs
+  // Handle keyboard shortcuts for switching to chat mode from any overlay
+  useInput((input, _key) => {
+    if (!loading && input === '1') {
+      setOverlayMode("none"); // Return to chat
+      setFilesPaneFocus('navigator'); // Reset focus
+      setFullPreviewMode(false); // Reset full preview mode
+    }
+  }, { 
+    // Always active to allow switching back to chat from any mode
+    isActive: true
+  });
+
+  // Handle keyboard shortcuts for tabs and navigation within overlays
   useInput((input, key) => {
     if (!loading) {
-      if (input === '1') {
-        setOverlayMode("none"); // Return to chat
-        setFilesPaneFocus('navigator'); // Reset focus
-        setFullPreviewMode(false); // Reset full preview mode
-      } else if (input === '2') {
+      if (input === '2') {
         setOverlayMode("files");
         setFilesPaneFocus('navigator'); // Start with navigator focus
         setFullPreviewMode(false); // Start in split view mode
@@ -241,6 +249,14 @@ export default function TerminalChat({
       } else if (overlayMode === "files" && filesPaneFocus === 'preview' && key.backspace) {
         // Backspace in preview mode goes back to navigator
         setFilesPaneFocus('navigator');
+      } else if (overlayMode === "files" && filesPaneFocus === 'preview' && input === 'e') {
+        // 'e' in preview mode enters edit mode for the selected file
+        if (selectedFile) {
+          // Exit files overlay and prompt Codex to edit this file
+          setOverlayMode('none');
+          setInitialPrompt(`Please edit the following file:\n${selectedFile}\n`);
+          setInitialImagePaths([]);
+        }
       } else if (overlayMode === "files" && key.escape) {
         // Escape in files mode exits to chat
         setOverlayMode("none");
@@ -253,8 +269,9 @@ export default function TerminalChat({
       }
     }
   }, { 
-    // Only handle input when not in an overlay that has its own input handling
-    isActive: overlayMode === "none" || overlayMode === "files" || overlayMode === "tasks"
+    // Only handle input when not in chat mode (to prevent interfering with chat input)
+    // or when in files/tasks mode where we need to handle navigation
+    isActive: overlayMode === "files" || overlayMode === "tasks"
   });
 
   // Keep a single AgentLoop instance alive across renders;
@@ -603,7 +620,7 @@ export default function TerminalChat({
               provider,
               approvalPolicy,
               colorsByPolicy,
-              agent,
+              agent: agent as AgentLoop,
               initialImagePaths,
               flexModeEnabled: Boolean(config.flexMode),
               showTabInfo: true,
@@ -638,7 +655,7 @@ export default function TerminalChat({
             openApprovalOverlay={() => setOverlayMode("approval")}
             openHelpOverlay={() => setOverlayMode("help")}
             openSessionsOverlay={() => setOverlayMode("sessions")}
-            openAgenticOverlay={() => {}}
+            _openAgenticOverlay={() => {}}
             openDiffOverlay={() => {
               const { isGitRepo, diff } = getGitDiff();
               let text: string;
@@ -693,6 +710,14 @@ export default function TerminalChat({
             }}
             items={items}
             thinkingSeconds={thinkingSeconds}
+            onSwitchToFiles={() => {
+              setOverlayMode("files");
+              setFilesPaneFocus('navigator');
+              setFullPreviewMode(false);
+            }}
+            onSwitchToTasks={() => {
+              setOverlayMode("tasks");
+            }}
           />
         )}
         {overlayMode === "history" && (
