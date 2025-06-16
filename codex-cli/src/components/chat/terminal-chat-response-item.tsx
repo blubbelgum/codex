@@ -206,7 +206,22 @@ function TerminalChatResponseToolCallOutput({
   message: ResponseFunctionToolCallOutputItem | any;
   fullStdout: boolean;
 }) {
-  const { output, metadata } = parseToolCallOutput(message.output);
+  // Parse the tool call output; it should be a JSON string with { output, metadata }
+  let { output, metadata } = parseToolCallOutput(message.output);
+  // If output itself appears to be a JSON wrapper, unwrap it
+  if (typeof output === 'string' && output.trim().startsWith('{')) {
+    try {
+      const maybe = JSON.parse(output);
+      if (maybe && typeof maybe === 'object' && 'output' in maybe) {
+        output = String((maybe as any).output);
+        if ('metadata' in maybe) {
+          metadata = (maybe as any).metadata;
+        }
+      }
+    } catch {
+      // not JSON, leave as-is
+    }
+  }
   const { exit_code, duration_seconds } = metadata;
   const metadataInfo = useMemo(
     () =>

@@ -667,18 +667,37 @@ function formatResponseItemForQuietMode(item: ResponseItem): string {
       const details = parseToolCall(item);
       return `$ ${details?.cmdReadableText ?? item.name}`;
     }
-    case "function_call_output": {
-      // @ts-expect-error metadata unknown on ResponseFunctionToolCallOutputItem
-      const meta = item.metadata as ExecOutputMetadata;
-      const parts: Array<string> = [];
-      if (typeof meta?.exit_code === "number") {
-        parts.push(`code: ${meta.exit_code}`);
+    case "local_shell_call": {
+      // display a local shell invocation
+      // item.action.command is an array of strings
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const action: any = (item as any).action;
+      const cmdArr = Array.isArray(action.command) ? action.command : [];
+      const cmdText = formatCommandForDisplay(cmdArr);
+      const cwd = typeof action.working_directory === 'string' ? action.working_directory : '';
+      return cwd ? `(${cwd}) $ ${cmdText}` : `$ ${cmdText}`;
+    }
+    case "function_call_output":
+    case "local_shell_call_output": {
+      // parse the JSON envelope in item.output
+      let textOut = item.output;
+      let meta: ExecOutputMetadata | undefined;
+      try {
+        const p = JSON.parse(item.output);
+        if (p && typeof p === 'object') {
+          // @ts-expect-error
+          textOut = p.output ?? textOut;
+          // @ts-expect-error
+          meta = p.metadata;
+        }
+      } catch {
+        // leave raw textOut
       }
-      if (typeof meta?.duration_seconds === "number") {
-        parts.push(`duration: ${meta.duration_seconds}s`);
-      }
-      const header = parts.length > 0 ? ` (${parts.join(", ")})` : "";
-      return `command.stdout${header}\n${item.output}`;
+      const parts: string[] = [];
+      if (meta && typeof meta.exit_code === 'number') parts.push(`code: ${meta.exit_code}`);
+      if (meta && typeof meta.duration_seconds === 'number') parts.push(`duration: ${meta.duration_seconds}s`);
+      const header = parts.length ? ` (${parts.join(', ')})` : '';
+      return `command.stdout${header}\n${textOut}`;
     }
     default: {
       return JSON.stringify(item);
