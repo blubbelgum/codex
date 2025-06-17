@@ -1,8 +1,8 @@
-import React, { useState, useEffect, useMemo } from 'react';
-import { Box, Text, useInput } from 'ink';
-import fs from 'fs/promises';
-import path from 'path';
 import { useClipboard } from '../../hooks/use-clipboard.js';
+import fs from 'fs/promises';
+import { Box, Text, useInput } from 'ink';
+import path from 'path';
+import React, { useState, useEffect, useMemo } from 'react';
 
 interface FileItem {
   name: string;
@@ -29,7 +29,7 @@ export function FileNavigator({
   showHidden = false,
 }: FileNavigatorProps) {
   const [currentPath, setCurrentPath] = useState(initialPath);
-  const [files, setFiles] = useState<FileItem[]>([]);
+  const [files, setFiles] = useState<Array<FileItem>>([]);
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [scrollOffset, setScrollOffset] = useState(0);
   const [loading, setLoading] = useState(false);
@@ -47,7 +47,7 @@ export function FileNavigator({
     
     try {
       const entries = await fs.readdir(dirPath, { withFileTypes: true });
-      const fileItems: FileItem[] = [];
+      const fileItems: Array<FileItem> = [];
 
       // Add parent directory entry if not at root
       if (dirPath !== '/') {
@@ -64,7 +64,7 @@ export function FileNavigator({
         const itemPath = path.join(dirPath, entry.name);
         const isHidden = entry.name.startsWith('.');
         
-        if (!showHiddenFiles && isHidden) continue;
+        if (!showHiddenFiles && isHidden) {continue;}
 
         try {
           const stats = await fs.stat(itemPath);
@@ -84,10 +84,10 @@ export function FileNavigator({
 
       // Sort: directories first, then files, alphabetically
       fileItems.sort((a, b) => {
-        if (a.name === '..') return -1;
-        if (b.name === '..') return 1;
-        if (a.isDirectory && !b.isDirectory) return -1;
-        if (!a.isDirectory && b.isDirectory) return 1;
+        if (a.name === '..') {return -1;}
+        if (b.name === '..') {return 1;}
+        if (a.isDirectory && !b.isDirectory) {return -1;}
+        if (!a.isDirectory && b.isDirectory) {return 1;}
         return a.name.toLowerCase().localeCompare(b.name.toLowerCase());
       });
 
@@ -109,7 +109,7 @@ export function FileNavigator({
 
   // Handle keyboard input
   useInput((input, key) => {
-    if (!isActive) return;
+    if (!isActive) {return;}
     // Handle search mode input
     if (isSearching) {
       if (key.return) {
@@ -215,7 +215,7 @@ export function FileNavigator({
   }, [files.length, selectedIndex, scrollOffset, height]);
 
   const formatFileSize = (bytes?: number): string => {
-    if (!bytes) return '';
+    if (!bytes) {return '';}
     const units = ['B', 'KB', 'MB', 'GB'];
     let size = bytes;
     let unitIndex = 0;
@@ -229,13 +229,13 @@ export function FileNavigator({
   };
 
   const formatDate = (date?: Date): string => {
-    if (!date) return '';
+    if (!date) {return '';}
     return date.toLocaleDateString();
   };
 
   const getFileIcon = (file: FileItem): string => {
-    if (file.name === '..') return '📁';
-    if (file.isDirectory) return '📁';
+    if (file.name === '..') {return '📁';}
+    if (file.isDirectory) {return '📁';}
     
     const ext = path.extname(file.name).toLowerCase();
     switch (ext) {
@@ -259,14 +259,14 @@ export function FileNavigator({
   };
 
   const getFileColor = (file: FileItem): string => {
-    if (file.name === '..') return 'blue';
-    if (file.isDirectory) return 'blue';
-    if (file.isHidden) return 'gray';
+    if (file.name === '..') {return 'blue';}
+    if (file.isDirectory) {return 'blue';}
+    if (file.isHidden) {return 'gray';}
     
     const ext = path.extname(file.name).toLowerCase();
-    if (['.js', '.ts', '.jsx', '.tsx'].includes(ext)) return 'yellow';
-    if (['.json', '.yaml', '.yml'].includes(ext)) return 'green';
-    if (['.md', '.txt'].includes(ext)) return 'white';
+    if (['.js', '.ts', '.jsx', '.tsx'].includes(ext)) {return 'yellow';}
+    if (['.json', '.yaml', '.yml'].includes(ext)) {return 'green';}
+    if (['.md', '.txt'].includes(ext)) {return 'white';}
     
     return 'white';
   };

@@ -29,9 +29,8 @@ import App from "./app";
 import { runSinglePass } from "./cli-singlepass";
 import SessionsOverlay from "./components/sessions-overlay.js";
 import { AgentLoop } from "./utils/agent/agent-loop";
-import { createRolloutAwareAgentLoop } from "./utils/agent/rollout-agent-loop";
-import { RolloutReplay } from "./utils/rollout-replay";
 import { ReviewDecision } from "./utils/agent/review";
+import { createRolloutAwareAgentLoop } from "./utils/agent/rollout-agent-loop";
 import { AutoApprovalMode } from "./utils/auto-approval-mode";
 import { checkForUpdates } from "./utils/check-updates";
 import {
@@ -47,6 +46,7 @@ import { createInputItem } from "./utils/input-utils";
 import { initLogger } from "./utils/logger/log";
 import { isModelSupportedForResponses } from "./utils/model-utils.js";
 import { parseToolCall } from "./utils/parsers";
+import { RolloutReplay } from "./utils/rollout-replay";
 import { onExit, setInkRenderer } from "./utils/terminal";
 import chalk from "chalk";
 import { spawnSync } from "child_process";
@@ -693,9 +693,9 @@ function formatResponseItemForQuietMode(item: ResponseItem): string {
       } catch {
         // leave raw textOut
       }
-      const parts: string[] = [];
-      if (meta && typeof meta.exit_code === 'number') parts.push(`code: ${meta.exit_code}`);
-      if (meta && typeof meta.duration_seconds === 'number') parts.push(`duration: ${meta.duration_seconds}s`);
+      const parts: Array<string> = [];
+      if (meta && typeof meta.exit_code === 'number') {parts.push(`code: ${meta.exit_code}`);}
+      if (meta && typeof meta.duration_seconds === 'number') {parts.push(`duration: ${meta.duration_seconds}s`);}
       const header = parts.length ? ` (${parts.join(', ')})` : '';
       return `command.stdout${header}\n${textOut}`;
     }

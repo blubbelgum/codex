@@ -1,6 +1,6 @@
-import React, { useState, useEffect, useMemo } from 'react';
-import { Box, Text, useInput } from 'ink';
 import { useTerminalSize } from '../../hooks/use-terminal-size.js';
+import { Box, Text, useInput } from 'ink';
+import React, { useState, useEffect, useMemo } from 'react';
 
 export interface Pane {
   id: string;
@@ -14,7 +14,7 @@ export interface Pane {
 export interface PaneLayout {
   type: 'horizontal' | 'vertical';
   panes: Array<Pane | PaneLayout>;
-  sizes?: number[]; // Proportional sizes (sum should equal 1)
+  sizes?: Array<number>; // Proportional sizes (sum should equal 1)
 }
 
 interface MultiPaneLayoutProps {
@@ -34,13 +34,13 @@ export function MultiPaneLayout({
 }: MultiPaneLayoutProps) {
   const { columns, rows } = useTerminalSize();
   const [focusedPaneIndex, setFocusedPaneIndex] = useState(0);
-  const [paneSizes, setPaneSizes] = useState<number[]>(
+  const [paneSizes, setPaneSizes] = useState<Array<number>>(
     layout.sizes || Array(layout.panes.length).fill(1 / layout.panes.length)
   );
 
   // Get all pane IDs for navigation
-  const getAllPaneIds = (paneLayout: PaneLayout): string[] => {
-    const ids: string[] = [];
+  const getAllPaneIds = (paneLayout: PaneLayout): Array<string> => {
+    const ids: Array<string> = [];
     
     paneLayout.panes.forEach(pane => {
       if ('id' in pane) {
@@ -57,7 +57,7 @@ export function MultiPaneLayout({
 
   // Handle pane navigation
   useInput((input, key) => {
-    if (!isActive) return;
+    if (!isActive) {return;}
 
     if (key.tab && !key.shift) {
       // Next pane
@@ -223,12 +223,12 @@ export function MultiPaneLayout({
 }
 
 // Utility functions for creating layouts
-export const createHorizontalLayout = (panes: Pane[]): PaneLayout => ({
+export const createHorizontalLayout = (panes: Array<Pane>): PaneLayout => ({
   type: 'horizontal',
   panes,
 });
 
-export const createVerticalLayout = (panes: Pane[]): PaneLayout => ({
+export const createVerticalLayout = (panes: Array<Pane>): PaneLayout => ({
   type: 'vertical',
   panes,
 });

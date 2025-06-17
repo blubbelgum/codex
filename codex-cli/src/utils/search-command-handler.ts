@@ -1,6 +1,6 @@
+import { smartWebSearch } from "./agent/web-search.js";
 import fs from "fs/promises";
 import path from "path";
-import { smartWebSearch } from "./agent/web-search.js";
 
 export interface SearchCommandOptions {
   query: string;

@@ -9,8 +9,8 @@ export interface Task {
   status: "pending" | "in_progress" | "completed" | "blocked";
   priority: "low" | "medium" | "high" | "critical";
   complexity: number; // 1-10 scale
-  dependencies: number[]; // array of task IDs this task depends on
-  tags: string[];
+  dependencies: Array<number>; // array of task IDs this task depends on
+  tags: Array<string>;
   createdAt: string;
   updatedAt: string;
   estimatedHours?: number;
@@ -21,14 +21,14 @@ export interface Task {
 export interface TaskProject {
   name: string;
   description: string;
-  tasks: Task[];
+  tasks: Array<Task>;
   createdAt: string;
   updatedAt: string;
   version: string;
 }
 
 export interface TaskListResponse {
-  tasks: Task[];
+  tasks: Array<Task>;
   total: number;
   pending: number;
   completed: number;
@@ -169,7 +169,7 @@ export class TaskMaster {
     const priorityOrder = { critical: 4, high: 3, medium: 2, low: 1 };
     availableTasks.sort((a, b) => {
       const priorityDiff = priorityOrder[b.priority] - priorityOrder[a.priority];
-      if (priorityDiff !== 0) return priorityDiff;
+      if (priorityDiff !== 0) {return priorityDiff;}
       return a.complexity - b.complexity; // Lower complexity first
     });
 
@@ -244,8 +244,8 @@ export class TaskMaster {
    */
   async analyzeComplexity(): Promise<{
     averageComplexity: number;
-    highComplexityTasks: Task[];
-    recommendations: string[];
+    highComplexityTasks: Array<Task>;
+    recommendations: Array<string>;
   }> {
     const project = await this.loadProject();
     if (!project) {
@@ -260,7 +260,7 @@ export class TaskMaster {
     const averageComplexity = tasks.reduce((sum, task) => sum + task.complexity, 0) / tasks.length;
     const highComplexityTasks = tasks.filter(task => task.complexity >= 8);
     
-    const recommendations: string[] = [];
+    const recommendations: Array<string> = [];
     
     if (averageComplexity > 7) {
       recommendations.push("Consider breaking down complex tasks into smaller, manageable pieces");
@@ -358,7 +358,7 @@ ${task.dependencies.length > 0 ? `Dependencies: ${task.dependencies.join(", ")}`
 /**
  * Parse basic task command arguments
  */
-export function parseTaskCommand(input: string): { action: string; args: string[] } {
+export function parseTaskCommand(input: string): { action: string; args: Array<string> } {
   const parts = input.trim().split(/\s+/);
   parts.shift(); // Remove "/task"
   

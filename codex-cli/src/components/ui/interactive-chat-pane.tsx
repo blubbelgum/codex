@@ -1,11 +1,12 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { Box, Text, useInput } from 'ink';
-import TextInput from '../vendor/ink-text-input';
-import Spinner from '../vendor/ink-spinner';
 import type { ResponseItem } from 'openai/resources/responses/responses.mjs';
+
 import { VirtualChatRenderer } from './virtual-chat-renderer.js';
-import { createMockAgent } from '../../utils/mock-agent.js';
 import { memoryManager } from '../../utils/memory-manager.js';
+import { createMockAgent } from '../../utils/mock-agent.js';
+import Spinner from '../vendor/ink-spinner';
+import TextInput from '../vendor/ink-text-input';
+import { Box, Text, useInput } from 'ink';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 
 interface ChatMessage {
   id: string;
@@ -21,7 +22,7 @@ interface InteractiveChatPaneProps {
 }
 
 export function InteractiveChatPane({ isActive, height, width }: InteractiveChatPaneProps) {
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [messages, setMessages] = useState<Array<ChatMessage>>([]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [showInput, setShowInput] = useState(true);
@@ -83,7 +84,7 @@ export function InteractiveChatPane({ isActive, height, width }: InteractiveChat
   };
 
   const handleSubmit = useCallback(async () => {
-    if (!input.trim() || isLoading) return;
+    if (!input.trim() || isLoading) {return;}
     
     const userInput = input.trim();
     setInput('');
@@ -107,7 +108,7 @@ export function InteractiveChatPane({ isActive, height, width }: InteractiveChat
 
   // Handle keyboard input for active pane
   useInput((input, key) => {
-    if (!isActive) return;
+    if (!isActive) {return;}
 
     if (key.return && showInput) {
       handleSubmit();

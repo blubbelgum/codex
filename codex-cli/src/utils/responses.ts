@@ -248,8 +248,8 @@ function getFullMessages(
 // Function to convert tools
 function convertTools(
   tools?: ResponseCreateInput["tools"],
-): Array<OpenAI.Chat.Completions.ChatCompletionTool> | any[] | undefined {
-  if (!tools) return undefined;
+): Array<OpenAI.Chat.Completions.ChatCompletionTool> | Array<any> | undefined {
+  if (!tools) {return undefined;}
   
   // Check if any tool has a type that's not standard OpenAI function tool
   const hasNonStandardTools = tools.some(tool => {

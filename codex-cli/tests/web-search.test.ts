@@ -389,7 +389,7 @@ describe("formatSearchResults", () => {
   });
 
   it("should format single result", () => {
-    const results: WebSearchResult[] = [
+    const results: Array<WebSearchResult> = [
       {
         title: "Test Result",
         url: "https://example.com",
@@ -407,7 +407,7 @@ describe("formatSearchResults", () => {
   });
 
   it("should format multiple results", () => {
-    const results: WebSearchResult[] = [
+    const results: Array<WebSearchResult> = [
       {
         title: "First Result",
         url: "https://example1.com",
@@ -431,7 +431,7 @@ describe("formatSearchResults", () => {
   });
 
   it("should include date when available", () => {
-    const results: WebSearchResult[] = [
+    const results: Array<WebSearchResult> = [
       {
         title: "Dated Result",
         url: "https://example.com",

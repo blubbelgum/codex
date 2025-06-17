@@ -1,4 +1,5 @@
 import type { ResponseItem } from 'openai/resources/responses/responses.mjs';
+
 import { EventEmitter } from 'events';
 
 interface MockAgentOptions {

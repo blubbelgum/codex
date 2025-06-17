@@ -1,20 +1,19 @@
 import type { CommandConfirmation } from "./agent-loop.js";
 import type { ApplyPatchCommand, ApprovalPolicy } from "../../approvals.js";
 import type { ExecInput } from "./sandbox/interface.js";
-import type { ResponseInputItem } from "openai/resources/responses/responses.mjs";
-import type { ResponseFunctionToolCall } from "openai/resources/responses/responses.mjs";
+import type { ResponseInputItem , ResponseFunctionToolCall } from "openai/resources/responses/responses.mjs";
 
 import { canAutoApprove } from "../../approvals.js";
 import { formatCommandForDisplay } from "../../format-command.js";
 import { FullAutoErrorMode } from "../auto-approval-mode.js";
 import { CODEX_UNSAFE_ALLOW_NO_SANDBOX, type AppConfig } from "../config.js";
 import { exec, execApplyPatch } from "./exec.js";
+import { adaptCommandForPlatform } from "./platform-commands.js";
 import { ReviewDecision } from "./review.js";
 import { isLoggingEnabled, log } from "../logger/log.js";
+import { parseToolCallArguments } from "../parsers.js";
 import { SandboxType } from "./sandbox/interface.js";
 import { PATH_TO_SEATBELT_EXECUTABLE } from "./sandbox/macos-seatbelt.js";
-import { parseToolCallArguments } from "../parsers.js";
-import { adaptCommandForPlatform } from "./platform-commands.js";
 import fs from "fs/promises";
 import os from "os";
 
@@ -626,7 +625,7 @@ export async function handleExecCommandWithRecovery(
     cmd,
     workdir,
     timeoutInMillis,
-    additionalWritableRoots: [] as string[],
+    additionalWritableRoots: [] as Array<string>,
   };
 
   try {
@@ -678,7 +677,7 @@ function validateAndFixApplyPatchFormat(cmd: Array<string>): Array<string> {
   }
 
   // Check if patch content is properly formatted
-  const issues: string[] = [];
+  const issues: Array<string> = [];
   
   // Must start with "*** Begin Patch"
   if (!patchContent.startsWith("*** Begin Patch")) {

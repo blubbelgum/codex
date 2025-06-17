@@ -25,19 +25,19 @@ export interface Task {
   updatedAt: Date;
   completedAt?: Date;
   dueDate?: Date;
-  tags: string[];
+  tags: Array<string>;
   progress?: number; // 0-100
   estimatedDuration?: number; // in minutes
   actualDuration?: number; // in minutes
-  dependencies: string[]; // Task IDs that must complete first
+  dependencies: Array<string>; // Task IDs that must complete first
   assignee?: string;
   metadata?: Record<string, any>;
 }
 
 export interface TaskFilter {
-  status?: TaskStatus[];
-  priority?: TaskPriority[];
-  tags?: string[];
+  status?: Array<TaskStatus>;
+  priority?: Array<TaskPriority>;
+  tags?: Array<string>;
   assignee?: string;
   dueBefore?: Date;
   dueAfter?: Date;
@@ -58,7 +58,7 @@ export interface TaskStats {
 
 export class TaskManager extends EventEmitter {
   private tasks: Map<string, Task> = new Map();
-  private subscribers: Set<(tasks: Task[]) => void> = new Set();
+  private subscribers: Set<(tasks: Array<Task>) => void> = new Set();
 
   constructor() {
     super();
@@ -81,7 +81,7 @@ export class TaskManager extends EventEmitter {
 
   updateTask(id: string, updates: Partial<Omit<Task, 'id' | 'createdAt'>>): Task | null {
     const task = this.tasks.get(id);
-    if (!task) return null;
+    if (!task) {return null;}
 
     const updatedTask: Task = {
       ...task,
@@ -103,7 +103,7 @@ export class TaskManager extends EventEmitter {
 
   deleteTask(id: string): boolean {
     const task = this.tasks.get(id);
-    if (!task) return false;
+    if (!task) {return false;}
 
     this.tasks.delete(id);
     this.emit('taskDeleted', task);
@@ -115,20 +115,20 @@ export class TaskManager extends EventEmitter {
     return this.tasks.get(id) || null;
   }
 
-  getAllTasks(): Task[] {
+  getAllTasks(): Array<Task> {
     return Array.from(this.tasks.values());
   }
 
   // Task filtering and searching
-  filterTasks(filter: TaskFilter): Task[] {
+  filterTasks(filter: TaskFilter): Array<Task> {
     return Array.from(this.tasks.values()).filter(task => {
-      if (filter.status && !filter.status.includes(task.status)) return false;
-      if (filter.priority && !filter.priority.includes(task.priority)) return false;
-      if (filter.assignee && task.assignee !== filter.assignee) return false;
-      if (filter.tags && !filter.tags.some(tag => task.tags.includes(tag))) return false;
+      if (filter.status && !filter.status.includes(task.status)) {return false;}
+      if (filter.priority && !filter.priority.includes(task.priority)) {return false;}
+      if (filter.assignee && task.assignee !== filter.assignee) {return false;}
+      if (filter.tags && !filter.tags.some(tag => task.tags.includes(tag))) {return false;}
       
-      if (filter.dueBefore && task.dueDate && task.dueDate > filter.dueBefore) return false;
-      if (filter.dueAfter && task.dueDate && task.dueDate < filter.dueAfter) return false;
+      if (filter.dueBefore && task.dueDate && task.dueDate > filter.dueBefore) {return false;}
+      if (filter.dueAfter && task.dueDate && task.dueDate < filter.dueAfter) {return false;}
       
       if (filter.searchText) {
         const searchLower = filter.searchText.toLowerCase();
@@ -136,7 +136,7 @@ export class TaskManager extends EventEmitter {
           task.title.toLowerCase().includes(searchLower) ||
           task.description?.toLowerCase().includes(searchLower) ||
           task.tags.some(tag => tag.toLowerCase().includes(searchLower));
-        if (!matches) return false;
+        if (!matches) {return false;}
       }
 
       return true;
@@ -162,11 +162,11 @@ export class TaskManager extends EventEmitter {
     let completedCount = 0;
 
     tasks.forEach(task => {
-      if (task.status === TaskStatus.PENDING) statusCounts.pending++;
-      else if (task.status === TaskStatus.IN_PROGRESS) statusCounts.inProgress++;
-      else if (task.status === TaskStatus.COMPLETED) statusCounts.completed++;
-      else if (task.status === TaskStatus.FAILED) statusCounts.failed++;
-      else if (task.status === TaskStatus.CANCELLED) statusCounts.cancelled++;
+      if (task.status === TaskStatus.PENDING) {statusCounts.pending++;}
+      else if (task.status === TaskStatus.IN_PROGRESS) {statusCounts.inProgress++;}
+      else if (task.status === TaskStatus.COMPLETED) {statusCounts.completed++;}
+      else if (task.status === TaskStatus.FAILED) {statusCounts.failed++;}
+      else if (task.status === TaskStatus.CANCELLED) {statusCounts.cancelled++;}
 
       if (task.dueDate && task.dueDate < now && task.status !== TaskStatus.COMPLETED) {
         overdue++;
@@ -190,7 +190,7 @@ export class TaskManager extends EventEmitter {
   // Task dependencies
   canStartTask(id: string): boolean {
     const task = this.getTask(id);
-    if (!task) return false;
+    if (!task) {return false;}
 
     return task.dependencies.every(depId => {
       const depTask = this.getTask(depId);
@@ -198,20 +198,20 @@ export class TaskManager extends EventEmitter {
     });
   }
 
-  getBlockedTasks(): Task[] {
+  getBlockedTasks(): Array<Task> {
     return this.getAllTasks().filter(task => 
       task.status === TaskStatus.PENDING && !this.canStartTask(task.id)
     );
   }
 
-  getReadyTasks(): Task[] {
+  getReadyTasks(): Array<Task> {
     return this.getAllTasks().filter(task => 
       task.status === TaskStatus.PENDING && this.canStartTask(task.id)
     );
   }
 
   // Subscription management
-  subscribe(callback: (tasks: Task[]) => void): () => void {
+  subscribe(callback: (tasks: Array<Task>) => void): () => void {
     this.subscribers.add(callback);
     return () => this.subscribers.delete(callback);
   }
@@ -222,14 +222,14 @@ export class TaskManager extends EventEmitter {
   }
 
   // Bulk operations
-  markMultipleCompleted(ids: string[]): Task[] {
-    return ids.map(id => this.updateTask(id, { status: TaskStatus.COMPLETED })).filter(Boolean) as Task[];
+  markMultipleCompleted(ids: Array<string>): Array<Task> {
+    return ids.map(id => this.updateTask(id, { status: TaskStatus.COMPLETED })).filter(Boolean) as Array<Task>;
   }
 
-  deleteMultiple(ids: string[]): number {
+  deleteMultiple(ids: Array<string>): number {
     let deleted = 0;
     ids.forEach(id => {
-      if (this.deleteTask(id)) deleted++;
+      if (this.deleteTask(id)) {deleted++;}
     });
     return deleted;
   }
@@ -241,15 +241,15 @@ export class TaskManager extends EventEmitter {
 
   importTasks(data: string): number {
     try {
-      const tasks: Task[] = JSON.parse(data);
+      const tasks: Array<Task> = JSON.parse(data);
       let imported = 0;
       
       tasks.forEach(task => {
         // Ensure dates are properly parsed
         task.createdAt = new Date(task.createdAt);
         task.updatedAt = new Date(task.updatedAt);
-        if (task.completedAt) task.completedAt = new Date(task.completedAt);
-        if (task.dueDate) task.dueDate = new Date(task.dueDate);
+        if (task.completedAt) {task.completedAt = new Date(task.completedAt);}
+        if (task.dueDate) {task.dueDate = new Date(task.dueDate);}
         
         this.tasks.set(task.id, task);
         imported++;

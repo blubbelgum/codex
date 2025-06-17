@@ -1,5 +1,5 @@
-import { useState, useCallback, useEffect, useRef } from 'react';
 import { useInput } from 'ink';
+import { useState, useCallback, useEffect, useRef } from 'react';
 
 export interface Selection {
   startLine: number;
@@ -10,7 +10,7 @@ export interface Selection {
 }
 
 export interface UseTextSelectionOptions {
-  content: string[];
+  content: Array<string>;
   isActive?: boolean;
   onSelectionChange?: (selection: Selection | null) => void;
 }
@@ -26,7 +26,7 @@ export function useTextSelection({
   const selectionStartRef = useRef<{ line: number; column: number } | null>(null);
 
   const startSelection = useCallback(() => {
-    if (!isActive) return;
+    if (!isActive) {return;}
     
     setIsSelecting(true);
     selectionStartRef.current = { ...cursorPosition };
@@ -34,7 +34,7 @@ export function useTextSelection({
   }, [cursorPosition, isActive]);
 
   const updateSelection = useCallback(() => {
-    if (!isSelecting || !selectionStartRef.current) return;
+    if (!isSelecting || !selectionStartRef.current) {return;}
 
     const start = selectionStartRef.current;
     const end = cursorPosition;
@@ -58,7 +58,7 @@ export function useTextSelection({
     let selectedText = '';
     for (let line = startLine; line <= endLine; line++) {
       const lineContent = content[line];
-      if (!lineContent) continue;
+      if (!lineContent) {continue;}
       
       if (line === startLine && line === endLine) {
         selectedText += lineContent.substring(startColumn, endColumn);
@@ -107,7 +107,7 @@ export function useTextSelection({
 
   // Handle keyboard input for selection
   useInput((input, key) => {
-    if (!isActive) return;
+    if (!isActive) {return;}
 
     // Start/update selection with Shift+Arrow keys
     if (key.shift) {

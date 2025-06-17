@@ -1,7 +1,7 @@
-import { useCallback, useState } from 'react';
 import { exec } from 'child_process';
-import { promisify } from 'util';
 import os from 'os';
+import { useCallback, useState } from 'react';
+import { promisify } from 'util';
 
 const execAsync = promisify(exec);
 

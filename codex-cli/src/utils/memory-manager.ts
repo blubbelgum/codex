@@ -22,7 +22,7 @@ interface FileCache {
 export class MemoryManager {
   private config: MemoryConfig;
   private fileCache = new Map<string, CacheEntry<FileCache>>();
-  private directoryCache = new Map<string, CacheEntry<string[]>>();
+  private directoryCache = new Map<string, CacheEntry<Array<string>>>();
   private cleanupTimer?: NodeJS.Timeout;
 
   constructor(config: Partial<MemoryConfig> = {}) {
@@ -39,8 +39,8 @@ export class MemoryManager {
 
   // Chat message management
   optimizeChatMessages<T extends { id: string; timestamp: Date }>(
-    messages: T[]
-  ): T[] {
+    messages: Array<T>
+  ): Array<T> {
     if (messages.length <= this.config.maxChatMessages) {
       return messages;
     }
@@ -53,7 +53,7 @@ export class MemoryManager {
     const older = messages.slice(0, -recentCount);
     
     // Keep some older messages (every nth message to maintain context)
-    const keepOld: T[] = [];
+    const keepOld: Array<T> = [];
     const step = Math.max(1, Math.floor(older.length / keepOldCount));
     for (let i = 0; i < older.length; i += step) {
       if (keepOld.length < keepOldCount && i < older.length) {
@@ -86,7 +86,7 @@ export class MemoryManager {
 
   getCachedFile(filePath: string): FileCache | null {
     const entry = this.fileCache.get(filePath);
-    if (!entry) return null;
+    if (!entry) {return null;}
 
     // Update access statistics
     entry.accessCount++;
@@ -96,7 +96,7 @@ export class MemoryManager {
   }
 
   // Directory cache management
-  cacheDirectory(dirPath: string, entries: string[]): void {
+  cacheDirectory(dirPath: string, entries: Array<string>): void {
     const now = Date.now();
     
     if (this.directoryCache.size >= this.config.maxDirectoryCache) {
@@ -111,9 +111,9 @@ export class MemoryManager {
     });
   }
 
-  getCachedDirectory(dirPath: string): string[] | null {
+  getCachedDirectory(dirPath: string): Array<string> | null {
     const entry = this.directoryCache.get(dirPath);
-    if (!entry) return null;
+    if (!entry) {return null;}
 
     entry.accessCount++;
     entry.lastAccess = Date.now();

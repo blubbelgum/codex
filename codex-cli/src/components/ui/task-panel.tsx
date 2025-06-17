@@ -1,14 +1,17 @@
-import React, { useState, useEffect, useMemo } from 'react';
-import { Box, Text, useInput } from 'ink';
-import chalk from 'chalk';
+import type { 
+  Task, 
+  TaskFilter} from '../../utils/task-manager.js';
+
 import { 
   TaskManager, 
-  Task, 
   TaskStatus, 
-  TaskPriority, 
-  TaskFilter,
+  TaskPriority,
   taskManager 
 } from '../../utils/task-manager.js';
+import chalk from 'chalk';
+import { Box, Text, useInput } from 'ink';
+import React, { useState, useEffect, useMemo } from 'react';
+
 
 interface TaskPanelProps {
   isActive?: boolean;
@@ -17,7 +20,7 @@ interface TaskPanelProps {
 }
 
 export function TaskPanel({ isActive = true, height = 20, onTaskSelect }: TaskPanelProps) {
-  const [tasks, setTasks] = useState<Task[]>([]);
+  const [tasks, setTasks] = useState<Array<Task>>([]);
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [filter, setFilter] = useState<TaskFilter>({});
   const [showCompleted, setShowCompleted] = useState(false);
@@ -32,7 +35,7 @@ export function TaskPanel({ isActive = true, height = 20, onTaskSelect }: TaskPa
 
   // Filter and sort tasks
   const filteredTasks = useMemo(() => {
-    let filtered = taskManager.filterTasks({
+    const filtered = taskManager.filterTasks({
       ...filter,
       status: showCompleted ? undefined : [TaskStatus.PENDING, TaskStatus.IN_PROGRESS],
     });
@@ -44,9 +47,9 @@ export function TaskPanel({ isActive = true, height = 20, onTaskSelect }: TaskPa
           const priorityOrder = { urgent: 4, high: 3, medium: 2, low: 1 };
           return priorityOrder[b.priority] - priorityOrder[a.priority];
         case 'dueDate':
-          if (!a.dueDate && !b.dueDate) return 0;
-          if (!a.dueDate) return 1;
-          if (!b.dueDate) return -1;
+          if (!a.dueDate && !b.dueDate) {return 0;}
+          if (!a.dueDate) {return 1;}
+          if (!b.dueDate) {return -1;}
           return a.dueDate.getTime() - b.dueDate.getTime();
         case 'created':
         default:
@@ -59,7 +62,7 @@ export function TaskPanel({ isActive = true, height = 20, onTaskSelect }: TaskPa
 
   // Handle keyboard input
   useInput((input, key) => {
-    if (!isActive) return;
+    if (!isActive) {return;}
 
     if (key.upArrow) {
       setSelectedIndex(prev => Math.max(0, prev - 1));
@@ -100,10 +103,10 @@ export function TaskPanel({ isActive = true, height = 20, onTaskSelect }: TaskPa
   }, [filteredTasks.length, selectedIndex]);
 
   const getTaskColor = (task: Task): string => {
-    if (task.status === TaskStatus.COMPLETED) return 'green';
-    if (task.status === TaskStatus.FAILED) return 'red';
-    if (task.status === TaskStatus.CANCELLED) return 'gray';
-    if (task.dueDate && task.dueDate < new Date()) return 'yellow';
+    if (task.status === TaskStatus.COMPLETED) {return 'green';}
+    if (task.status === TaskStatus.FAILED) {return 'red';}
+    if (task.status === TaskStatus.CANCELLED) {return 'gray';}
+    if (task.dueDate && task.dueDate < new Date()) {return 'yellow';}
     
     switch (task.priority) {
       case TaskPriority.URGENT: return 'magenta';
@@ -136,14 +139,14 @@ export function TaskPanel({ isActive = true, height = 20, onTaskSelect }: TaskPa
   };
 
   const formatDueDate = (dueDate?: Date): string => {
-    if (!dueDate) return '';
+    if (!dueDate) {return '';}
     const now = new Date();
     const diffMs = dueDate.getTime() - now.getTime();
     const diffDays = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
     
-    if (diffDays < 0) return `${Math.abs(diffDays)}d overdue`;
-    if (diffDays === 0) return 'due today';
-    if (diffDays === 1) return 'due tomorrow';
+    if (diffDays < 0) {return `${Math.abs(diffDays)}d overdue`;}
+    if (diffDays === 0) {return 'due today';}
+    if (diffDays === 1) {return 'due tomorrow';}
     return `due in ${diffDays}d`;
   };
 

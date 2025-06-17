@@ -21,8 +21,8 @@ export interface MockExecResult {
 export interface MockAgentState {
   currentDir: string;
   fileSystem: MockFileSystem;
-  commandHistory: Array<{ command: string[]; result: MockExecResult }>;
-  webSearchResults: Array<{ query: string; results: any[] }>;
+  commandHistory: Array<{ command: Array<string>; result: MockExecResult }>;
+  webSearchResults: Array<{ query: string; results: Array<any> }>;
   tasks: Array<{ id: number; title: string; status: string }>;
 }
 
@@ -114,7 +114,7 @@ export class MockAgent extends EventEmitter {
   /**
    * Mock shell/exec function calls
    */
-  public async mockShellCall(command: string[], workdir?: string): Promise<MockExecResult> {
+  public async mockShellCall(command: Array<string>, workdir?: string): Promise<MockExecResult> {
     await this.delay();
     
     const startTime = Date.now();
@@ -178,9 +178,9 @@ export class MockAgent extends EventEmitter {
     return result;
   }
 
-  private mockLsCommand(args: string[], workdir?: string): string {
+  private mockLsCommand(args: Array<string>, workdir?: string): string {
     const targetDir = workdir || this.state.currentDir;
-    const entries: string[] = [];
+    const entries: Array<string> = [];
 
     // List files in directory
     Object.keys(this.state.fileSystem.files).forEach(path => {
@@ -199,7 +199,7 @@ export class MockAgent extends EventEmitter {
     return entries.sort().join('\n');
   }
 
-  private mockCatCommand(args: string[]): string {
+  private mockCatCommand(args: Array<string>): string {
     if (args.length === 0) {
       throw new Error('cat: missing file operand');
     }
@@ -214,7 +214,7 @@ export class MockAgent extends EventEmitter {
     return content;
   }
 
-  private mockMkdirCommand(args: string[]): string {
+  private mockMkdirCommand(args: Array<string>): string {
     if (args.length === 0) {
       throw new Error('mkdir: missing operand');
     }
@@ -239,7 +239,7 @@ export class MockAgent extends EventEmitter {
     return `Created directory: ${dirPath}`;
   }
 
-  private mockTouchCommand(args: string[]): string {
+  private mockTouchCommand(args: Array<string>): string {
     if (args.length === 0) {
       throw new Error('touch: missing file operand');
     }
@@ -253,7 +253,7 @@ export class MockAgent extends EventEmitter {
     return `File touched: ${args[0]}`;
   }
 
-  private mockCdCommand(args: string[]): string {
+  private mockCdCommand(args: Array<string>): string {
     if (args.length === 0) {
       this.state.currentDir = '/project';
     } else {
@@ -267,7 +267,7 @@ export class MockAgent extends EventEmitter {
     return '';
   }
 
-  private mockNpmCommand(args: string[]): string {
+  private mockNpmCommand(args: Array<string>): string {
     const subcommand = args[0] || '';
     
     switch (subcommand) {
@@ -288,7 +288,7 @@ export class MockAgent extends EventEmitter {
     }
   }
 
-  private mockNodeCommand(args: string[]): string {
+  private mockNodeCommand(args: Array<string>): string {
     if (args.length === 0) {
       return 'Welcome to Node.js v18.0.0.';
     }
@@ -303,7 +303,7 @@ export class MockAgent extends EventEmitter {
     return `Executing ${fileName}...\nScript completed successfully.`;
   }
 
-  private mockGitCommand(args: string[]): string {
+  private mockGitCommand(args: Array<string>): string {
     const subcommand = args[0] || '';
     
     switch (subcommand) {
@@ -322,7 +322,7 @@ export class MockAgent extends EventEmitter {
     }
   }
 
-  private mockApplyPatchCommand(args: string[]): string {
+  private mockApplyPatchCommand(args: Array<string>): string {
     if (args.length < 2) {
       throw new Error('apply_patch: missing patch content');
     }

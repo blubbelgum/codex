@@ -98,7 +98,7 @@ describe("AgentLoop Web Search Integration", () => {
       })
     );
 
-    const items: any[] = [];
+    const items: Array<any> = [];
     const agent = new AgentLoop({
       model: "gpt-4",
       config: { 
@@ -166,7 +166,7 @@ describe("AgentLoop Web Search Integration", () => {
       })
     );
 
-    const items: any[] = [];
+    const items: Array<any> = [];
     const agent = new AgentLoop({
       model: "gpt-4",
       config: { 
@@ -216,7 +216,7 @@ describe("AgentLoop Web Search Integration", () => {
       })
     );
 
-    const items: any[] = [];
+    const items: Array<any> = [];
     const agent = new AgentLoop({
       model: "gpt-4",
       config: { 
@@ -262,7 +262,7 @@ describe("AgentLoop Web Search Integration", () => {
       })
     );
 
-    const items: any[] = [];
+    const items: Array<any> = [];
     const agent = new AgentLoop({
       model: "gpt-4",
       config: { 
@@ -315,7 +315,7 @@ describe("AgentLoop Web Search Integration", () => {
       })
     );
 
-    const items: any[] = [];
+    const items: Array<any> = [];
     const agent = new AgentLoop({
       model: "gpt-4",
       config: { 

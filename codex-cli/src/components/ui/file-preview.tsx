@@ -1,8 +1,8 @@
-import React, { useState, useEffect } from 'react';
-import { Box, Text, useInput } from 'ink';
-import fs from 'fs/promises';
-import path from 'path';
 import { memoryManager } from '../../utils/memory-manager.js';
+import fs from 'fs/promises';
+import { Box, Text, useInput } from 'ink';
+import path from 'path';
+import React, { useState, useEffect } from 'react';
 
 interface FilePreviewProps {
   filePath: string | null;
@@ -26,7 +26,7 @@ interface FileInfo {
 
 interface SearchState {
   query: string;
-  results: number[];
+  results: Array<number>;
   currentIndex: number;
   isActive: boolean;
 }
@@ -206,7 +206,7 @@ export function FilePreview({
     }
 
     const lines = fileInfo.content.split('\n');
-    const results: number[] = [];
+    const results: Array<number> = [];
     
     lines.forEach((line, index) => {
       if (line.toLowerCase().includes(query.toLowerCase())) {
@@ -228,7 +228,7 @@ export function FilePreview({
 
   // Navigate search results
   const nextSearchResult = () => {
-    if (search.results.length === 0) return;
+    if (search.results.length === 0) {return;}
     const nextIndex = (search.currentIndex + 1) % search.results.length;
     setSearch(prev => ({ ...prev, currentIndex: nextIndex }));
     const targetLine = search.results[nextIndex];
@@ -238,7 +238,7 @@ export function FilePreview({
   };
 
   const prevSearchResult = () => {
-    if (search.results.length === 0) return;
+    if (search.results.length === 0) {return;}
     const prevIndex = search.currentIndex === 0 ? search.results.length - 1 : search.currentIndex - 1;
     setSearch(prev => ({ ...prev, currentIndex: prevIndex }));
     const targetLine = search.results[prevIndex];
@@ -249,7 +249,7 @@ export function FilePreview({
 
   // Go to line functionality
   const goToLine = (lineNumber: number) => {
-    if (!fileInfo) return;
+    if (!fileInfo) {return;}
     const targetLine = Math.max(1, Math.min(lineNumber, fileInfo.lines)) - 1;
     setScrollOffset(Math.max(0, targetLine - Math.floor(height / 2)));
     setGotoLineMode(false);
@@ -258,7 +258,7 @@ export function FilePreview({
 
   // Handle keyboard input
   useInput((input, key) => {
-    if (!isActive || !fileInfo) return;
+    if (!isActive || !fileInfo) {return;}
 
     // Handle goto line mode
     if (gotoLineMode) {
@@ -291,7 +291,7 @@ export function FilePreview({
       } else if (key.backspace) {
         const newQuery = search.query.slice(0, -1);
         setSearch(prev => ({ ...prev, query: newQuery }));
-        if (newQuery) performSearch(newQuery);
+        if (newQuery) {performSearch(newQuery);}
       } else if (input && input.length === 1) {
         const newQuery = search.query + input;
         setSearch(prev => ({ ...prev, query: newQuery }));
@@ -353,7 +353,7 @@ export function FilePreview({
   // Apply syntax highlighting
   const applySyntaxHighlighting = (line: string, extension: string): React.ReactNode => {
     // Basic syntax highlighting for common file types
-    if (!extension) return line;
+    if (!extension) {return line;}
 
     switch (extension) {
       case '.js':
@@ -447,8 +447,8 @@ export function FilePreview({
         const parts = line.split(linkRegex);
         const result = [];
         for (let i = 0; i < parts.length; i += 3) {
-          if (parts[i]) result.push(<Text key={i}>{parts[i]}</Text>);
-          if (parts[i + 1]) result.push(<Text key={i + 1} color="magenta">{parts[i + 1]}</Text>);
+          if (parts[i]) {result.push(<Text key={i}>{parts[i]}</Text>);}
+          if (parts[i + 1]) {result.push(<Text key={i + 1} color="magenta">{parts[i + 1]}</Text>);}
         }
         return result.length > 0 ? result : line;
       }

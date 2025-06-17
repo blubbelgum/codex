@@ -20,10 +20,10 @@ import {
   getBaseUrl,
   AZURE_OPENAI_API_VERSION,
 } from "../config.js";
-import { RolloutReplay } from "../rollout-replay.js";
 import { log } from "../logger/log.js";
 import { parseToolCallArguments } from "../parsers.js";
 import { responsesCreateViaChatCompletions } from "../responses.js";
+import { RolloutReplay } from "../rollout-replay.js";
 import { SessionLogger } from "../session-logger.js";
 import {
   ORIGIN,
@@ -746,25 +746,25 @@ export class AgentLoop {
           
             switch (action) {
               case "init":
-                if (projectName) commandString += ` ${projectName}`;
+                if (projectName) {commandString += ` ${projectName}`;}
                 break;
               case "add":
                 if (title) {
                   commandString += ` "${title}"`;
-                  if (description) commandString += ` ${description}`;
+                  if (description) {commandString += ` ${description}`;}
                 }
                 break;
               case "complete":
               case "status":
                 if (taskId !== undefined) {
                   commandString += ` ${taskId}`;
-                  if (action === "status" && status) commandString += ` ${status}`;
+                  if (action === "status" && status) {commandString += ` ${status}`;}
                 }
                 break;
               case "list":
-                if (filterStatus) commandString += ` --status ${filterStatus}`;
-                if (priority) commandString += ` --priority ${priority}`;
-                if (filterTag) commandString += ` --tag ${filterTag}`;
+                if (filterStatus) {commandString += ` --status ${filterStatus}`;}
+                if (priority) {commandString += ` --priority ${priority}`;}
+                if (filterTag) {commandString += ` --tag ${filterTag}`;}
                 break;
             }
           

@@ -1,9 +1,9 @@
-import React, { useState } from 'react';
-import { Box, Text, useInput } from 'ink';
+import { useClipboard } from '../../hooks/use-clipboard.js';
 import TextInput from '../vendor/ink-text-input';
 import fs from 'fs/promises';
+import { Box, Text, useInput } from 'ink';
 import path from 'path';
-import { useClipboard } from '../../hooks/use-clipboard.js';
+import React, { useState } from 'react';
 
 interface FileOperationsProps {
   currentPath: string;
@@ -37,7 +37,7 @@ export function FileOperations({ currentPath, selectedFile, onRefresh, isActive 
 
   // Handle keyboard shortcuts
   useInput((input, key) => {
-    if (!isActive) return;
+    if (!isActive) {return;}
 
     if (mode === 'idle') {
       if (input === 'n') {
@@ -135,7 +135,7 @@ export function FileOperations({ currentPath, selectedFile, onRefresh, isActive 
   };
 
   const handleDelete = async () => {
-    if (!selectedFile) return;
+    if (!selectedFile) {return;}
 
     try {
       const stats = await fs.stat(selectedFile);

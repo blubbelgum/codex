@@ -1,11 +1,11 @@
-import type { ResponseItem, ResponseInputItem } from "openai/resources/responses/responses";
 import type { ApprovalPolicy } from "../../approvals";
 import type { AppConfig } from "../config";
 import type { CommandConfirmation } from "./agent-loop";
+import type { ResponseItem, ResponseInputItem } from "openai/resources/responses/responses";
 
 import { AgentLoop } from "./agent-loop";
-import { RolloutReplay, createRolloutReplay } from "../rollout-replay";
 import { AutoApprovalMode } from "../auto-approval-mode";
+import { RolloutReplay, createRolloutReplay } from "../rollout-replay";
 import { ReviewDecision } from "./review";
 
 export interface RolloutAgentLoopOptions {
@@ -153,7 +153,7 @@ export class RolloutAgentLoop {
    * Process a single replay item
    */
   private async processReplayItem(item: any): Promise<void> {
-    if (!this.rolloutReplay) return;
+    if (!this.rolloutReplay) {return;}
 
     await this.rolloutReplay.delay();
 

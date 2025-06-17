@@ -1,15 +1,16 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { Box, Text } from 'ink';
-import { SelectableText } from './selectable-text.js';
-import { AgentLoop } from '../../utils/agent/agent-loop.js';
-import { createInputItem } from '../../utils/input-utils.js';
-import { formatCommandForDisplay } from '../../format-command.js';
-import { uniqueById } from '../../utils/model-utils.js';
-import type { AppConfig } from '../../utils/config.js';
 import type { ApprovalPolicy } from '../../approvals.js';
-import type { ResponseItem } from 'openai/resources/responses/responses.mjs';
 import type { CommandConfirmation } from '../../utils/agent/agent-loop.js';
+import type { AppConfig } from '../../utils/config.js';
+import type { ResponseItem } from 'openai/resources/responses/responses.mjs';
+
+import { SelectableText } from './selectable-text.js';
+import { formatCommandForDisplay } from '../../format-command.js';
+import { AgentLoop } from '../../utils/agent/agent-loop.js';
 import { ReviewDecision } from '../../utils/agent/review.js';
+import { createInputItem } from '../../utils/input-utils.js';
+import { uniqueById } from '../../utils/model-utils.js';
+import { Box, Text } from 'ink';
+import React, { useState, useEffect, useRef } from 'react';
 
 interface ChatPaneProps {
   config: AppConfig;
@@ -74,7 +75,7 @@ export function ChatPane({
   // Process initial prompt
   useEffect(() => {
     const processInitialPrompt = async () => {
-      if (!initialPrompt || !agentRef.current) return;
+      if (!initialPrompt || !agentRef.current) {return;}
       
       try {
         const inputItem = await createInputItem(initialPrompt, initialImagePaths || []);

@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 
-import { MockAgent, MockAgentOptions } from './utils/agent/mock-agent.js';
+import type { MockAgentOptions } from './utils/agent/mock-agent.js';
+
+import { MockAgent } from './utils/agent/mock-agent.js';
 
 interface SimulationResult {
   success: boolean;
@@ -14,8 +16,8 @@ interface SimulationResult {
 interface E2ETestScenario {
   name: string;
   prompt: string;
-  expectedFiles?: string[];
-  expectedCommands?: string[];
+  expectedFiles?: Array<string>;
+  expectedCommands?: Array<string>;
   timeout?: number;
 }
 
@@ -51,7 +53,7 @@ export class E2ESimulator {
       const state = this.mockAgent.getState();
       
       // Generate output summary
-      let output = this.generateOutputSummary(result, projectFiles, state);
+      const output = this.generateOutputSummary(result, projectFiles, state);
       
       this.log(`Simulation completed in ${duration}ms`);
       
@@ -122,7 +124,7 @@ export class E2ESimulator {
   /**
    * Run multiple scenarios in sequence
    */
-  public async runTestSuite(scenarios: E2ETestScenario[]): Promise<{
+  public async runTestSuite(scenarios: Array<E2ETestScenario>): Promise<{
     passed: number;
     failed: number;
     results: Array<SimulationResult & { scenarioName: string }>;
@@ -158,7 +160,7 @@ export class E2ESimulator {
     projectFiles: Map<string, string>,
     state: any
   ): string {
-    const lines: string[] = [];
+    const lines: Array<string> = [];
     
     lines.push("=".repeat(60));
     lines.push("🚀 E2E SIMULATION RESULTS");
@@ -275,7 +277,7 @@ export class E2ESimulator {
 }
 
 // Predefined test scenarios
-export const DEFAULT_TEST_SCENARIOS: E2ETestScenario[] = [
+export const DEFAULT_TEST_SCENARIOS: Array<E2ETestScenario> = [
   {
     name: "Simple Web Application",
     prompt: "Create a simple React web application with a landing page and basic styling",

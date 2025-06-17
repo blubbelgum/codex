@@ -1,6 +1,6 @@
-import React, { useMemo } from 'react';
-import { Box, Text } from 'ink';
 import { SelectableText } from './selectable-text.js';
+import { Box, Text } from 'ink';
+import React, { useMemo } from 'react';
 
 interface ChatMessage {
   id: string;
@@ -10,7 +10,7 @@ interface ChatMessage {
 }
 
 interface VirtualChatRendererProps {
-  messages: ChatMessage[];
+  messages: Array<ChatMessage>;
   scrollOffset: number;
   maxVisibleHeight: number;
   isActive: boolean;
@@ -37,7 +37,7 @@ export function VirtualChatRenderer({
 
   // Calculate visible messages using virtual scrolling
   const visibleData = useMemo(() => {
-    if (messages.length === 0) return { messages: [], startIndex: 0, endIndex: 0 };
+    if (messages.length === 0) {return { messages: [], startIndex: 0, endIndex: 0 };}
 
     let currentHeight = 0;
     let startIndex = 0;
@@ -79,7 +79,7 @@ export function VirtualChatRenderer({
   // Truncate content for performance
   const truncateContent = (content: string): string => {
     const lines = content.split('\n');
-    if (lines.length <= maxLines) return content;
+    if (lines.length <= maxLines) {return content;}
     return lines.slice(0, maxLines).join('\n') + '\n... (content truncated, scroll to see more)';
   };
 

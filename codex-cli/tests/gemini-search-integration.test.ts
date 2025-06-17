@@ -175,7 +175,7 @@ describe("Gemini Google Search Integration", () => {
     for (const testCase of testCases) {
       const isCodex = testCase.model.startsWith("codex");
 
-      let expectedToolTypes: string[];
+      let expectedToolTypes: Array<string>;
       
       if (isCodex) {
         expectedToolTypes = ["local_shell", "function"];

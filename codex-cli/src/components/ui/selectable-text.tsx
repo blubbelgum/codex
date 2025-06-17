@@ -1,8 +1,8 @@
-import React, { useEffect, useMemo } from 'react';
-import { Box, Text, useInput } from 'ink';
-import chalk from 'chalk';
 import { useClipboard } from '../../hooks/use-clipboard.js';
 import { useTextSelection } from '../../hooks/use-text-selection.js';
+import chalk from 'chalk';
+import { Box, Text, useInput } from 'ink';
+import React, { useEffect, useMemo } from 'react';
 
 interface SelectableTextProps {
   children: string;
@@ -30,7 +30,7 @@ export function SelectableText({
 
   // Handle copy shortcut
   useInput((input, key) => {
-    if (!isActive || !selection) return;
+    if (!isActive || !selection) {return;}
 
     // Ctrl+C or Cmd+C to copy
     if ((key.ctrl || key.meta) && input === 'c') {
@@ -39,7 +39,7 @@ export function SelectableText({
   }, { isActive });
 
   const handleCopy = async () => {
-    if (!selection || !isSupported) return;
+    if (!selection || !isSupported) {return;}
 
     await copyToClipboard(selection.text);
     onCopy?.(selection.text);
@@ -67,7 +67,7 @@ export function SelectableText({
 
     // Line is part of selection
     const chars = line.split('');
-    const elements: React.ReactElement[] = [];
+    const elements: Array<React.ReactElement> = [];
     
     chars.forEach((char, charIndex) => {
       const isSelected = 
@@ -95,7 +95,7 @@ export function SelectableText({
 
   const renderCursor = () => {
     const currentLine = lines[cursorPosition.line];
-    if (!isActive || !currentLine) return null;
+    if (!isActive || !currentLine) {return null;}
 
     const beforeCursor = currentLine.substring(0, cursorPosition.column);
     const atCursor = currentLine[cursorPosition.column] || ' ';

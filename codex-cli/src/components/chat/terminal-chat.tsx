@@ -225,9 +225,9 @@ export default function TerminalChat({
   // Handle keyboard shortcuts for switching to chat mode from any overlay
   useInput((input, _key) => {
     if (!loading && input === '1') {
-      setOverlayMode("none"); // Return to chat
-      setFilesPaneFocus('navigator'); // Reset focus
-      setFullPreviewMode(false); // Reset full preview mode
+        setOverlayMode("none"); // Return to chat
+        setFilesPaneFocus('navigator'); // Reset focus
+        setFullPreviewMode(false); // Reset full preview mode
     }
   }, { 
     // Always active to allow switching back to chat from any mode

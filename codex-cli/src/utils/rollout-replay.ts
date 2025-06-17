@@ -18,7 +18,7 @@ export interface RolloutItem {
 
 export interface RolloutData {
   session: RolloutSession;
-  items: RolloutItem[];
+  items: Array<RolloutItem>;
 }
 
 export interface RolloutReplayOptions {
@@ -153,7 +153,7 @@ export class RolloutReplay {
    * Skip to a specific item type (e.g., skip to next function_call)
    */
   public skipToType(type: string): RolloutItem | null {
-    if (!this.rolloutData) return null;
+    if (!this.rolloutData) {return null;}
     
     while (this.currentIndex < this.rolloutData.items.length) {
       const item = this.rolloutData.items[this.currentIndex];
@@ -170,7 +170,7 @@ export class RolloutReplay {
    * Find the corresponding function_call_output for a function_call
    */
   public findFunctionOutput(callId: string): RolloutItem | null {
-    if (!this.rolloutData) return null;
+    if (!this.rolloutData) {return null;}
     
     for (let i = this.currentIndex; i < this.rolloutData.items.length; i++) {
       const item = this.rolloutData.items[i];
@@ -237,8 +237,8 @@ export class RolloutReplay {
   /**
    * Get all assistant messages from the rollout
    */
-  public getAssistantMessages(): string[] {
-    if (!this.rolloutData) return [];
+  public getAssistantMessages(): Array<string> {
+    if (!this.rolloutData) {return [];}
     
     return this.rolloutData.items
       .filter(item => item.type === 'message' && item.role === 'assistant')
