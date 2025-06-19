@@ -330,31 +330,42 @@ export async function handleExecCommand(
     // Check for replace_in_file command
     if (bashScript.includes("replace_in_file")) {
       try {
-        // Try multiple regex patterns to handle different quote styles and formatting
+        // Improved regex patterns to handle different quote styles and formatting
         const patterns = [
-          /replace_in_file\s+(\S+)\s+<<'EOF'\n(.*?)\nEOF/s,
-          /replace_in_file\s+(\S+)\s+<<"EOF"\n(.*?)\nEOF/s,
-          /replace_in_file\s+(\S+)\s+<<EOF\n(.*?)\nEOF/s,
-          /replace_in_file\s+(\S+)\s+<<'EOF'([\s\S]*?)EOF/s,
-          /replace_in_file\s+([^\s]+)\s+<<'EOF'([\s\S]*?)EOF/s,
+          /replace_in_file\s+(\S+)\s+<<'EOF'\s*\n([\s\S]*?)\nEOF\s*$/,
+          /replace_in_file\s+(\S+)\s+<<"EOF"\s*\n([\s\S]*?)\nEOF\s*$/,
+          /replace_in_file\s+(\S+)\s+<<EOF\s*\n([\s\S]*?)\nEOF\s*$/,
+          /replace_in_file\s+(\S+)\s+<<'EOF'\s*([\s\S]*?)EOF\s*$/,
+          /replace_in_file\s+([^\s]+)\s+<<'EOF'\s*([\s\S]*?)EOF\s*$/,
         ];
         
         let match = null;
         let diffContent = "";
         let filePath = "";
         
-        for (const pattern of patterns) {
+        for (let i = 0; i < patterns.length; i++) {
+          const pattern = patterns[i];
+          if (!pattern) {
+            continue;
+          }
+          
           match = bashScript.match(pattern);
           if (match && match[1] && match[2] !== undefined) {
             filePath = match[1];
             diffContent = match[2];
-            // Clean up the diff content - remove leading/trailing whitespace lines
+            
+            // More careful cleaning - only remove leading/trailing empty lines, not all whitespace
             diffContent = diffContent.replace(/^\n+/, '').replace(/\n+$/, '');
+            
+            log(`replace_in_file: Matched pattern ${i}, file: ${filePath}, content length: ${diffContent.length}`);
             break;
           }
         }
         
         if (match && filePath && diffContent) {
+          log(`replace_in_file: About to apply diff to ${filePath}`);
+          log(`replace_in_file: Diff content preview: ${diffContent.slice(0, 200)}...`);
+          
           const result = applySearchReplaceDiff(filePath, diffContent, workdir);
           return {
             outputText: JSON.stringify({
@@ -365,9 +376,29 @@ export async function handleExecCommand(
           };
         } else {
           // Enhanced error message with debugging info
+          log(`replace_in_file: Failed to parse command`);
+          log(`replace_in_file: Bash script: ${bashScript}`);
+          
           return {
             outputText: JSON.stringify({
-              output: `Error: Could not parse replace_in_file command. Script preview:\n${bashScript.slice(0, 500)}...`,
+              output: `Error: Could not parse replace_in_file command. 
+
+Debug info:
+- Script length: ${bashScript.length}
+- Contains 'replace_in_file': ${bashScript.includes("replace_in_file")}
+- Contains 'EOF': ${bashScript.includes("EOF")}
+
+Script preview:
+${bashScript.slice(0, 500)}${bashScript.length > 500 ? '...' : ''}
+
+Expected format:
+replace_in_file filename <<'EOF'
+------- SEARCH
+old content
+=======
+new content
++++++++ REPLACE
+EOF`,
               metadata: { error: "replace_in_file_parse_failed" }
             }),
             metadata: { error: "replace_in_file_parse_failed" }
@@ -375,6 +406,7 @@ export async function handleExecCommand(
         }
       } catch (error) {
         const errorMessage = error instanceof Error ? error.message : String(error);
+        log(`replace_in_file: Exception during processing: ${errorMessage}`);
         return {
           outputText: JSON.stringify({
             output: `Error: ${errorMessage}`,

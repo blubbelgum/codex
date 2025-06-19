@@ -48,10 +48,26 @@ export function applySearchReplaceDiff(filePath: string, diffContent: string, wo
       let { searchContent } = block;
       const { replaceContent } = block;
       
+      log(`Searching for content in ${filePath}: "${searchContent.slice(0, 100)}..."`);
+      
       // Try exact match first
       let searchIndex = modifiedContent.indexOf(searchContent);
       
-      // If exact match fails, try normalized whitespace matching
+      // If exact match fails, try with normalized line endings
+      if (searchIndex === -1) {
+        const normalizedSearch = searchContent.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+        const normalizedContent = modifiedContent.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+        
+        searchIndex = normalizedContent.indexOf(normalizedSearch);
+        if (searchIndex !== -1) {
+          log(`Found match after line ending normalization at position ${searchIndex}`);
+          // Update to use the normalized content for replacement
+          modifiedContent = normalizedContent;
+          searchContent = normalizedSearch;
+        }
+      }
+      
+      // If still no match, try normalized whitespace matching
       if (searchIndex === -1) {
         // Normalize whitespace in both search content and file content for matching
         const normalizeWhitespace = (text: string) => 
@@ -63,46 +79,47 @@ export function applySearchReplaceDiff(filePath: string, diffContent: string, wo
         const normalizedIndex = normalizedContent.indexOf(normalizedSearch);
         
         if (normalizedIndex !== -1) {
+          log(`Found match after whitespace normalization`);
           // Find the actual position in the original content by mapping back
-          // This is a simplified approach - count words/tokens to find position
-          const wordsBeforeMatch = normalizedContent.slice(0, normalizedIndex).split(' ').length - 1;
-          
-          // Reconstruct position in original content
+          // This is a simplified approach - count characters to find position
           let actualStart = 0;
-          let wordCount = 0;
+          let actualEnd = 0;
+          let normalizedCharCount = 0;
           
-          for (let i = 0; i < modifiedContent.length && wordCount < wordsBeforeMatch; i++) {
-            if (/\S/.test(modifiedContent[i] || '')) {
-              if (i === 0 || /\s/.test(modifiedContent[i - 1] || '')) {
-                wordCount++;
-                if (wordCount === wordsBeforeMatch + 1) {
-                  actualStart = i;
-                  break;
-                }
+          // Find start position
+          for (let i = 0; i < modifiedContent.length; i++) {
+            const char = modifiedContent[i];
+            if (char && !/\s/.test(char)) {
+              if (normalizedCharCount === normalizedIndex) {
+                actualStart = i;
+                break;
               }
+              normalizedCharCount++;
             }
           }
           
-          // Find the end position by looking for the search content with flexible whitespace
+          // Find end position by looking for the search content with flexible whitespace
           const searchWords = searchContent.split(/\s+/).filter(word => word.length > 0);
-          let actualEnd = actualStart;
           let currentWordIndex = 0;
           
           for (let i = actualStart; i < modifiedContent.length && currentWordIndex < searchWords.length; i++) {
-            if (/\S/.test(modifiedContent[i] || '')) {
-              if (i === actualStart || /\s/.test(modifiedContent[i - 1] || '')) {
-                // Start of a word
-                const wordEnd = modifiedContent.slice(i).search(/\s|$/);
-                const word = modifiedContent.slice(i, wordEnd === -1 ? undefined : i + wordEnd);
-                
-                if (word === searchWords[currentWordIndex]) {
-                  currentWordIndex++;
-                  if (currentWordIndex === searchWords.length) {
-                    actualEnd = wordEnd === -1 ? modifiedContent.length : i + wordEnd;
-                    break;
-                  }
-                  i += Math.max(0, wordEnd - 1);
+            const char = modifiedContent[i];
+            if (char && /\S/.test(char)) {
+              // Find word boundaries
+              let wordEnd = i;
+              while (wordEnd < modifiedContent.length && /\S/.test(modifiedContent[wordEnd] || '')) {
+                wordEnd++;
+              }
+              
+              const word = modifiedContent.slice(i, wordEnd);
+              
+              if (word === searchWords[currentWordIndex]) {
+                currentWordIndex++;
+                if (currentWordIndex === searchWords.length) {
+                  actualEnd = wordEnd;
+                  break;
                 }
+                i = wordEnd - 1; // -1 because loop will increment
               }
             }
           }
@@ -110,21 +127,65 @@ export function applySearchReplaceDiff(filePath: string, diffContent: string, wo
           if (currentWordIndex === searchWords.length) {
             searchIndex = actualStart;
             searchContent = modifiedContent.slice(actualStart, actualEnd);
+            log(`Mapped back to original content: "${searchContent.slice(0, 50)}..."`);
+          }
+        }
+      }
+      
+      // If still no match, try substring search for partial content
+      if (searchIndex === -1) {
+        const searchLines = searchContent.split('\n');
+        if (searchLines.length > 1) {
+          // Try to find a unique line from the middle of the search content
+          const middleLineIndex = Math.floor(searchLines.length / 2);
+          const middleLine = searchLines[middleLineIndex]?.trim();
+          
+          if (middleLine && middleLine.length > 10) {
+            const lineIndex = modifiedContent.indexOf(middleLine);
+            if (lineIndex !== -1) {
+              log(`Found partial match with middle line: "${middleLine}"`);
+              // This is a partial match - we should warn but try to continue
+              log(`Warning: Using partial match. This may lead to incorrect replacements.`);
+            }
           }
         }
       }
       
       if (searchIndex === -1) {
-        throw new Error(
-          `Search content not found in file:\n` +
-          `SEARCH:\n${searchContent}\n\n` +
-          `FILE CONTENT PREVIEW:\n${modifiedContent.slice(0, 800)}${modifiedContent.length > 800 ? '...' : ''}\n\n` +
-          `DEBUGGING HINTS:\n` +
-          `1. Check for exact whitespace and indentation match\n` +
-          `2. Look for special characters that might need escaping\n` +
-          `3. Consider using smaller, more specific search blocks\n` +
-          `4. Use cat command to examine exact file content first`
-        );
+        // Enhanced error with more debugging info
+        const fileLines = modifiedContent.split('\n');
+        const searchLines = searchContent.split('\n');
+        
+        let debugInfo = `Search content not found in file:\n`;
+        debugInfo += `SEARCH (${searchLines.length} lines):\n${searchContent}\n\n`;
+        debugInfo += `FILE CONTENT PREVIEW (first 20 lines):\n`;
+        debugInfo += fileLines.slice(0, 20).map((line, i) => `${i + 1}: ${line}`).join('\n');
+        debugInfo += `${fileLines.length > 20 ? '\n... (truncated)' : ''}\n\n`;
+        
+        debugInfo += `DEBUGGING HINTS:\n`;
+        debugInfo += `1. Check for exact whitespace and indentation match\n`;
+        debugInfo += `2. Look for special characters that might need escaping\n`;
+        debugInfo += `3. Consider using smaller, more specific search blocks\n`;
+        debugInfo += `4. Use read_file command to examine exact file content first\n`;
+        debugInfo += `5. Try searching for a unique line first, then expand context\n\n`;
+        
+        // Try to suggest similar content
+        if (searchLines.length > 0 && searchLines[0]) {
+          const firstSearchLine = searchLines[0].trim();
+          const similarLines = fileLines
+            .map((line, index) => ({ line: line.trim(), index }))
+            .filter(({ line }) => line.includes(firstSearchLine.slice(0, 20)) || firstSearchLine.includes(line.slice(0, 20)))
+            .slice(0, 3);
+          
+          if (similarLines.length > 0) {
+            debugInfo += `SIMILAR LINES FOUND:\n`;
+            similarLines.forEach(({ line, index }) => {
+              debugInfo += `Line ${index + 1}: ${line}\n`;
+            });
+          }
+        }
+        
+        throw new Error(debugInfo);
       }
       
       // Replace the found content
@@ -132,6 +193,8 @@ export function applySearchReplaceDiff(filePath: string, diffContent: string, wo
         modifiedContent.slice(0, searchIndex) + 
         replaceContent + 
         modifiedContent.slice(searchIndex + searchContent.length);
+        
+      log(`Successfully replaced content at position ${searchIndex}`);
     }
     
     // Write the modified content back
