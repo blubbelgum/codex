@@ -70,10 +70,16 @@ When using the shell tool for file operations, use EXACTLY this format:
 ### Modify Files: 
 {"command": ["bash", "-c", "replace_in_file filename <<'EOF'\\n------- SEARCH\\nexact_content\\n=======\\nnew_content\\n+++++++ REPLACE\\nEOF"]}
 
-### Read Files:
-{"command": ["cat", "filename"]} or {"command": ["head", "-50", "filename"]}
+### Read Files (for debugging):
+{"command": ["bash", "-c", "read_file filename"]} or {"command": ["cat", "filename"]}
 
-**CRITICAL**: The bash -c wrapper is required for write_to_file and replace_in_file commands.
+**SEARCH/REPLACE DEBUGGING TIPS:**
+1. Use read_file or cat first to see exact file content
+2. Copy exact whitespace and indentation from the file
+3. Use smaller, unique search blocks if large searches fail
+4. Special characters must match exactly
+
+**CRITICAL**: The bash -c wrapper is required for write_to_file, replace_in_file, and read_file commands.
 
 **FORBIDDEN**: Never use apply_patch, patch, or "*** Begin Patch" format - these are deprecated.
 `;
