@@ -38,8 +38,5 @@ export const SLASH_COMMANDS: Array<SlashCommand> = [
     command: "/search",
     description: "Search the web for information and optionally save results to markdown file",
   },
-  {
-    command: "/task",
-    description: "Access task management features - list, next, complete, analyze tasks",
-  },
+
 ];

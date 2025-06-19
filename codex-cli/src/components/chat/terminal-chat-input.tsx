@@ -55,7 +55,7 @@ export default function TerminalChatInput({
   openHelpOverlay,
   openDiffOverlay,
   openSessionsOverlay,
-  _openAgenticOverlay,
+
 
   onCompact,
   interruptAgent,
@@ -63,7 +63,6 @@ export default function TerminalChatInput({
   thinkingSeconds,
   items = [],
   onSwitchToFiles,
-  onSwitchToTasks,
 }: {
   isNew: boolean;
   loading: boolean;
@@ -83,7 +82,7 @@ export default function TerminalChatInput({
   openHelpOverlay: () => void;
   openDiffOverlay: () => void;
   openSessionsOverlay: () => void;
-  _openAgenticOverlay: () => void;
+
 
   onCompact: () => void;
   interruptAgent: () => void;
@@ -92,7 +91,6 @@ export default function TerminalChatInput({
   // New: current conversation items so we can include them in bug reports
   items?: Array<ResponseItem>;
   onSwitchToFiles?: () => void;
-  onSwitchToTasks?: () => void;
 }): React.ReactElement {
   // Track whether the input is focused (allows typing) or unfocused (allows tab switching)
   const [inputFocused, setInputFocused] = useState(true);
@@ -249,8 +247,8 @@ export default function TerminalChatInput({
         if (_input === '2' && onSwitchToFiles) {
           onSwitchToFiles();
           return;
-        } else if (_input === '3' && onSwitchToTasks) {
-          onSwitchToTasks();
+        } else if (_input === '3') {
+          // Key '3' reserved for future features
           return;
         }
         return;
@@ -352,6 +350,9 @@ export default function TerminalChatInput({
                   case "/task":
                     onSubmit(cmd);
                     break;
+                  case "/planact":
+                    // Plan & Act mode no longer supported
+                    break;
                   default:
                     break;
                 }
@@ -401,21 +402,32 @@ export default function TerminalChatInput({
         }
 
         if (_key.upArrow) {
-          let moveThroughHistory = true;
-
-          // Only use history when the caret was *already* on the very first
-          // row *before* this key-press.
           const cursorRow = editorRef.current?.getRow?.() ?? 0;
           const cursorCol = editorRef.current?.getCol?.() ?? 0;
           const wasAtFirstRow = (prevCursorRow.current ?? cursorRow) === 0;
-          if (!(cursorRow === 0 && wasAtFirstRow)) {
-            moveThroughHistory = false;
-          }
+          const isMultiline = input.includes('\n');
+          
+          let moveThroughHistory = false;
 
-          // If we are not yet in history mode, then also require that the col is zero so that
-          // we only trigger history navigation when the user is at the start of the input.
-          if (historyIndex == null && !(cursorRow === 0 && cursorCol === 0)) {
-            moveThroughHistory = false;
+          // History navigation logic:
+          if (historyIndex != null) {
+            // Already in history mode - allow navigation if at first row
+            if (cursorRow === 0 && wasAtFirstRow) {
+              moveThroughHistory = true;
+            }
+          } else {
+            // Not in history mode yet - decide when to start
+            if (isMultiline) {
+              // For multiline: only start history if at first row AND first column
+              if (cursorRow === 0 && cursorCol === 0 && wasAtFirstRow) {
+                moveThroughHistory = true;
+              }
+            } else {
+              // For single line: start history if at first row (regardless of column)
+              if (cursorRow === 0) {
+                moveThroughHistory = true;
+              }
+            }
           }
 
           // Move through history.
@@ -565,6 +577,10 @@ export default function TerminalChatInput({
       } else if (inputValue.startsWith("/approval")) {
         setInput("");
         openApprovalOverlay();
+        return;
+      } else if (inputValue === "/planact") {
+        setInput("");
+        // Plan & Act mode no longer supported
         return;
       } else if (["exit", "q", ":q"].includes(inputValue)) {
         setInput("");
@@ -823,62 +839,7 @@ export default function TerminalChatInput({
          }
         
         return;
-      } else if (inputValue.startsWith("/task ")) {
-        // Handle /task command locally
-        setInput("");
-        
-        const { handleTaskCommand } = await import("../../utils/task-command-handler.js");
-        
-        try {
-          const result = await handleTaskCommand(inputValue);
-          
-          setItems((prev) => [
-            ...prev,
-            {
-              id: `task-result-${Date.now()}`,
-              type: "message",
-              role: "system",
-              content: [
-                {
-                  type: "input_text",
-                  text: result.output,
-                },
-              ],
-            },
-          ]);
-          
-          if (!result.success && result.error) {
-            console.error("Task command error:", result.error);
-          }
-        } catch (error) {
-          setItems((prev) => [
-            ...prev,
-            {
-              id: `task-error-${Date.now()}`,
-              type: "message",
-              role: "system",
-              content: [
-                {
-                  type: "input_text",
-                  text: `❌ Task command failed: ${error instanceof Error ? error.message : 'Unknown error'}`,
-                },
-              ],
-            },
-          ]);
-        }
-        
-        // Add to history
-        const config = loadConfig();
-        if (config.history?.saveHistory) {
-          const updatedHistory = await addToHistory(inputValue, history, {
-            maxSize: config.history?.maxSize ?? 1000,
-            saveHistory: config.history?.saveHistory ?? true,
-            sensitivePatterns: config.history?.sensitivePatterns ?? [],
-          });
-          setHistory(updatedHistory);
-        }
-        
-        return;
+
       } else if (inputValue.startsWith("/")) {
         // Handle invalid/unrecognized commands. Only single-word inputs starting with '/'
         // (e.g., /command) that are not recognized are caught here. Any other input, including
@@ -981,6 +942,7 @@ export default function TerminalChatInput({
       onCompact,
       skipNextSubmit,
       items,
+
     ],
   );
 

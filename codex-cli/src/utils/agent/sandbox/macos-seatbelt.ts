@@ -21,7 +21,7 @@ function getCommonRoots() {
  */
 export const PATH_TO_SEATBELT_EXECUTABLE = "/usr/bin/sandbox-exec";
 
-export function execWithSeatbelt(
+export async function execWithSeatbelt(
   cmd: Array<string>,
   opts: SpawnOptions,
   writableRoots: ReadonlyArray<string>,

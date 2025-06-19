@@ -7,7 +7,8 @@ import { canAutoApprove } from "../../approvals.js";
 import { formatCommandForDisplay } from "../../format-command.js";
 import { FullAutoErrorMode } from "../auto-approval-mode.js";
 import { CODEX_UNSAFE_ALLOW_NO_SANDBOX, type AppConfig } from "../config.js";
-import { exec, execApplyPatch } from "./exec.js";
+import { exec } from "./exec.js";
+import { applySearchReplaceDiff, writeToFile } from "./handle-unified-diff.js";
 import { adaptCommandForPlatform } from "./platform-commands.js";
 import { ReviewDecision } from "./review.js";
 import { isLoggingEnabled, log } from "../logger/log.js";
@@ -77,7 +78,7 @@ async function attemptCommandWithRecovery(
   config: AppConfig,
   abortSignal?: AbortSignal,
 ): Promise<ExecCommandSummary> {
-  const { additionalWritableRoots = [] } = execInput as any;
+  const { additionalWritableRoots = [] } = execInput;
   
   // First attempt: Try the original command
   let result = await execCommand(
@@ -252,6 +253,8 @@ type HandleExecCommandResult = {
   additionalItems?: Array<ResponseInputItem>;
 };
 
+
+
 export async function handleExecCommand(
   args: ExecInput,
   config: AppConfig,
@@ -263,9 +266,101 @@ export async function handleExecCommand(
   ) => Promise<CommandConfirmation>,
   abortSignal?: AbortSignal,
 ): Promise<HandleExecCommandResult> {
-  const { cmd: command, workdir } = args;
+  const { cmd, workdir } = args;
 
-  const key = deriveCommandKey(command);
+  // Handle new unified diff commands
+  if (cmd[0] === "bash" && (cmd[1] === "-c" || cmd[1] === "-lc") && cmd[2]) {
+    const bashScript = cmd[2];
+    
+    // Check for write_to_file command
+    if (bashScript.includes("write_to_file")) {
+      try {
+        const match = bashScript.match(/write_to_file\s+(\S+)\s+<<'EOF'\n(.*)\nEOF/s);
+        if (match && match[1] && match[2] !== undefined) {
+          const filePath = match[1];
+          const content = match[2];
+          const result = writeToFile(filePath, content, workdir);
+          return {
+            outputText: JSON.stringify({
+              output: result,
+              metadata: { operation: "write_to_file", file: filePath }
+            }),
+            metadata: { operation: "write_to_file", file: filePath }
+          };
+        }
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        return {
+          outputText: JSON.stringify({
+            output: `Error: ${errorMessage}`,
+            metadata: { error: "write_to_file_failed" }
+          }),
+          metadata: { error: "write_to_file_failed" }
+        };
+      }
+    }
+    
+    // Check for replace_in_file command
+    if (bashScript.includes("replace_in_file")) {
+      try {
+        const match = bashScript.match(/replace_in_file\s+(\S+)\s+<<'EOF'\n(.*)\nEOF/s);
+        if (match && match[1] && match[2] !== undefined) {
+          const filePath = match[1];
+          const diffContent = match[2];
+          const result = applySearchReplaceDiff(filePath, diffContent, workdir);
+          return {
+            outputText: JSON.stringify({
+              output: result,
+              metadata: { operation: "replace_in_file", file: filePath }
+            }),
+            metadata: { operation: "replace_in_file", file: filePath }
+          };
+        }
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        return {
+          outputText: JSON.stringify({
+            output: `Error: ${errorMessage}`,
+            metadata: { error: "replace_in_file_failed" }
+          }),
+          metadata: { error: "replace_in_file_failed" }
+        };
+      }
+    }
+  }
+
+  // Handle deprecated apply_patch command with clear error message
+  if (cmd[0] === "apply_patch") {
+    const errorMessage = `Error: The 'apply_patch' command is no longer supported.
+
+Please use the new SEARCH/REPLACE format instead:
+
+For file modifications:
+replace_in_file path/to/file.ext <<'EOF'
+------- SEARCH
+exact_content_to_find
+=======
+new_content_to_replace_with
++++++++ REPLACE
+EOF
+
+For creating new files:
+write_to_file path/to/new_file.ext <<'EOF'
+complete_file_content
+EOF
+
+For reading files:
+read_file path/to/file.ext
+
+This new format is more reliable and provides better error handling.`;
+
+    return {
+      outputText: errorMessage,
+      metadata: { error: "command_deprecated" },
+    };
+  }
+
+  const key = deriveCommandKey(cmd);
 
   // 1) If the user has already said "always approve", skip
   //    any policy & never sandbox.
@@ -277,7 +372,7 @@ export async function handleExecCommand(
       additionalWritableRoots,
       config,
       abortSignal,
-    ).then((summary) => convertSummaryToResult(summary, command));
+    ).then((summary) => convertSummaryToResult(summary, cmd));
   }
 
   // 2) Otherwise fall back to the normal policy
@@ -286,7 +381,7 @@ export async function handleExecCommand(
   // working directory so that edits are constrained to the project root.  If
   // the caller wishes to broaden or restrict the set it can be made
   // configurable in the future.
-  const safety = canAutoApprove(command, workdir, policy, [process.cwd()]);
+  const safety = canAutoApprove(cmd, workdir, policy, [process.cwd()]);
 
   let runInSandbox: boolean;
   switch (safety.type) {
@@ -365,10 +460,10 @@ export async function handleExecCommand(
         config,
         abortSignal,
       );
-      return convertSummaryToResult(summary, command);
+      return convertSummaryToResult(summary, cmd);
     }
   } else {
-    return convertSummaryToResult(summary, command);
+    return convertSummaryToResult(summary, cmd);
   }
 }
 
@@ -382,6 +477,29 @@ function convertSummaryToResult(
   // If command failed with ENOENT on Windows, provide helpful suggestions
   if (exitCode !== 0 && command && stderr.includes("ENOENT")) {
     outputText = generateWindowsCommandSuggestion(command, outputText);
+  }
+
+  // Special handling for patch command permission errors
+  if (exitCode !== 0 && command && command[0] === "patch" && 
+      (stderr.includes("Permission denied") || stderr.includes("Can't create temporary file"))) {
+    outputText = `Error: ${stderr}\n\n` +
+      `The patch command failed due to permission issues in the sandboxed environment.\n\n` +
+      `RECOMMENDED SOLUTION:\n` +
+      `Use the new SEARCH/REPLACE format instead:\n\n` +
+      `replace_in_file filename <<'EOF'\n` +
+      `------- SEARCH\n` +
+      `exact_content_to_find\n` +
+      `=======\n` +
+      `new_content_to_replace_with\n` +
+      `+++++++ REPLACE\n` +
+      `EOF\n\n` +
+      `ALTERNATIVE APPROACHES:\n` +
+      `1. Use write_to_file to overwrite the entire file:\n` +
+      `   write_to_file ${command.length > 1 ? command[1] || '[filename]' : '[filename]'} <<'EOF'\n` +
+      `   [new file content]\n` +
+      `   EOF\n\n` +
+      `2. Use sed for simple replacements:\n` +
+      `   sed -i 's/old_text/new_text/g' ${command.length > 1 ? command[1] || '[filename]' : '[filename]'}\n`;
   }
 
   const metadata = {
@@ -399,6 +517,8 @@ function convertSummaryToResult(
   };
 }
 
+
+
 type ExecCommandSummary = {
   stdout: string;
   stderr: string;
@@ -414,13 +534,50 @@ async function execCommand(
   config: AppConfig,
   abortSignal?: AbortSignal,
 ): Promise<ExecCommandSummary> {
+  const { cmd } = execInput;
   let { workdir } = execInput;
+  let resolvedWorkdir = workdir || process.cwd();
+
+  // Handle deprecated apply_patch command with clear error message
+  if (cmd[0] === "apply_patch") {
+    const errorMessage = `Error: The 'apply_patch' command is no longer supported.
+
+Please use the new SEARCH/REPLACE format instead:
+
+For file modifications:
+replace_in_file path/to/file.ext <<'EOF'
+------- SEARCH
+exact_content_to_find
+=======
+new_content_to_replace_with
++++++++ REPLACE
+EOF
+
+For creating new files:
+write_to_file path/to/new_file.ext <<'EOF'
+complete_file_content
+EOF
+
+For reading files:
+read_file path/to/file.ext
+
+This new format is more reliable and provides better error handling.`;
+
+    return {
+      stdout: "",
+      stderr: errorMessage,
+      exitCode: 1,
+      durationMs: 0
+    };
+  }
+
   if (workdir) {
     try {
       await fs.access(workdir);
     } catch (e) {
       log(`EXEC workdir=${workdir} not found, use process.cwd() instead`);
-      workdir = process.cwd();
+      resolvedWorkdir = process.cwd();
+      workdir = resolvedWorkdir;
     }
   }
 
@@ -441,19 +598,15 @@ async function execCommand(
     );
   }
 
-  // Note execApplyPatch() and exec() are coded defensively and should not
-  // throw. Any internal errors should be mapped to a non-zero value for the
-  // exitCode field.
+  // Note exec() is coded defensively and should not throw.
+  // Any internal errors should be mapped to a non-zero value for the exitCode field.
   const start = Date.now();
-  const execResult =
-    applyPatchCommand != null
-      ? execApplyPatch(applyPatchCommand.patch, workdir)
-      : await exec(
-          { ...execInput, additionalWritableRoots },
-          await getSandbox(runInSandbox),
-          config,
-          abortSignal,
-        );
+  const execResult = await exec(
+    { ...execInput, additionalWritableRoots: [...additionalWritableRoots] },
+    await getSandbox(runInSandbox),
+    config,
+    abortSignal,
+  );
   const duration = Date.now() - start;
   const { stdout, stderr, exitCode } = execResult;
 
@@ -581,8 +734,8 @@ async function askUserPermission(
 // Enhanced version with automatic recovery for better cross-platform support
 export async function handleExecCommandWithRecovery(
   functionCall: ResponseFunctionToolCall,
-  enableStdoutTruncation: boolean = true,
-  enableFullStdout: boolean = false,
+  _enableStdoutTruncation: boolean = true,
+  _enableFullStdout: boolean = false,
   config: AppConfig,
   abortSignal?: AbortSignal,
 ): Promise<HandleExecCommandResult> {
@@ -601,7 +754,8 @@ export async function handleExecCommandWithRecovery(
   }
 
   // Enhanced command validation and apply_patch format fixing
-  let { cmd, workdir, timeoutInMillis } = command;
+  const { cmd: originalCmd, workdir, timeoutInMillis } = command;
+  let cmd = originalCmd;
   
   // Check for command repetition to prevent infinite loops
   const repetitionWarning = detectCommandRepetition(cmd);
@@ -621,11 +775,11 @@ export async function handleExecCommandWithRecovery(
   log(`Executing command with recovery: ${cmd.join(" ")} in ${workdir || process.cwd()}`);
 
   // Create execInput with corrected command
-  const execInput = {
+  const execInput: ExecInput = {
     cmd,
     workdir,
     timeoutInMillis,
-    additionalWritableRoots: [] as Array<string>,
+    additionalWritableRoots: [],
   };
 
   try {
@@ -781,7 +935,7 @@ function generateApplyPatchContextError(
 }
 
 // ---------------------------------------------------------------------------
-// Simple command repetition detection to prevent infinite loops
+// Command repetition detection
 // ---------------------------------------------------------------------------
 const recentCommands: Array<{ command: string; timestamp: number }> = [];
 const MAX_RECENT_COMMANDS = 10;

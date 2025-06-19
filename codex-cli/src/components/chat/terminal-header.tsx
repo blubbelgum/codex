@@ -122,12 +122,13 @@ const TerminalHeader: React.FC<TerminalHeaderProps> = ({
                 <Text bold>{path.basename(img)}</Text>
               </Text>
             ))}
+
             {showTabInfo && (
               <Text dimColor>
                 <Text color="blueBright">↳</Text> tabs:{" "}
                 <Text bold color="cyan">[1] Chat</Text>{" "}
                 <Text bold color="yellow">[2] Files</Text>{" "}
-                <Text bold color="green">[3] Tasks</Text>
+                <Text bold color="gray">[3] Reserved</Text>
               </Text>
             )}
           </Box>

@@ -19,13 +19,13 @@ import { fileURLToPath } from "url";
 export async function execWithLandlock(
   cmd: Array<string>,
   opts: SpawnOptions,
-  userProvidedWritableRoots: ReadonlyArray<string>,
+  additionalWritableRoots: ReadonlyArray<string>,
   config: AppConfig,
   abortSignal?: AbortSignal,
 ): Promise<ExecResult> {
   const sandboxExecutable = await getSandboxExecutable();
 
-  const extraSandboxPermissions = userProvidedWritableRoots.flatMap(
+  const extraSandboxPermissions = additionalWritableRoots.flatMap(
     (root: string) => ["--sandbox-permission", `disk-write-folder=${root}`],
   );
 

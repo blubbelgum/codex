@@ -15,25 +15,22 @@
 - [Experimental technology disclaimer](#experimental-technology-disclaimer)
 - [Quickstart](#quickstart)
 - [Why Codex?](#why-codex)
-- [Agentic Tools Interface](#agentic-tools-interface)
-  - [Tool Discovery and Project Analysis](#tool-discovery-and-project-analysis)
-  - [Command Composer](#command-composer)
+- [Enhanced User Interface](#enhanced-user-interface)
   - [Enhanced Approval System](#enhanced-approval-system)
-  - [Session History Management](#session-history-management)
-  - [Accessing Agentic Tools](#accessing-agentic-tools)
+  - [Enhanced File Preview System](#enhanced-file-preview-system)
 - [Security model & permissions](#security-model--permissions)
   - [Platform sandboxing details](#platform-sandboxing-details)
 - [System requirements](#system-requirements)
 - [CLI reference](#cli-reference)
   - [Interactive Commands](#interactive-commands)
-  - [Agentic Tools Shortcuts](#agentic-tools-shortcuts)
+  - [Interface Shortcuts](#interface-shortcuts)
 - [Memory & project docs](#memory--project-docs)
 - [Non-interactive / CI mode](#non-interactive--ci-mode)
 - [Rollout Replay System](#rollout-replay-system)
 - [Tracing / verbose logging](#tracing--verbose-logging)
 - [Recipes](#recipes)
   - [Basic Commands](#basic-commands)
-  - [Agentic Tools Examples](#agentic-tools-examples)
+  - [Interface Examples](#interface-examples)
 - [Installation](#installation)
 - [Configuration guide](#configuration-guide)
   - [Basic configuration parameters](#basic-configuration-parameters)
@@ -168,31 +165,37 @@ development_ that understands and executes your repo.
 - **Zero setup** - bring your OpenAI API key and it just works!
 - **Full auto-approval, while safe + secure** by running network-disabled and directory-sandboxed
 - **Multimodal** - pass in screenshots or diagrams to implement features
-- **Agentic tools interface** - intelligent project analysis and command composition
+- **Streamlined interface** - clean chat and file browsing modes
 
 And it's **fully open-source** so you can see and contribute to how it develops!
 
-- **Error Prevention**: Identifies common mistakes before execution
-- **Enhanced File Preview**: Advanced code viewing with syntax highlighting and developer tools
+## Enhanced User Interface
 
-### Session History Management
+Codex provides a clean, focused interface with two primary modes:
 
-View and manage your past Codex sessions:
+- **Chat Mode (Key 1)**: Interactive conversation with the AI assistant
+- **Files Mode (Key 2)**: Advanced file browsing and preview system
 
-- **Session Metadata**: Track model used, duration, and command count
-- **Session Browsing**: Navigate through historical interactions
-- **Summary Information**: Quick overview of what was accomplished
-- **Session Resumption**: Continue from previous session states
+### Interface Navigation
 
-### Accessing Agentic Tools
+| Mode         | Access | Description                                     |
+| ------------ | ------ | ----------------------------------------------- |
+| **Chat**     | `1`    | Primary conversation interface with the AI      |
+| **Files**    | `2`    | File browser with syntax highlighting and tools |
+| **Reserved** | `3`    | Reserved for future features                    |
 
-| Mode                 | Access          | Description                                         |
-| -------------------- | --------------- | --------------------------------------------------- |
-| **Tool Palette**     | `/tools` or `1` | Browse available tools with intelligent suggestions |
-| **Command Composer** | `2`             | AI-assisted command building and composition        |
-| **Session History**  | `3`             | View and manage past Codex sessions                 |
+The interface integrates seamlessly with existing approval modes and security model, maintaining the same sandboxing and permission controls.
 
-All agentic features integrate seamlessly with the existing approval modes and security model, maintaining the same sandboxing and permission controls.
+### Enhanced Approval System
+
+The enhanced approval system provides a more intuitive and informative command review experience:
+
+- **Command Preview**: Clear display of proposed commands with syntax highlighting
+- **Risk Assessment**: Automatic detection of potentially risky operations
+- **Detailed Explanations**: AI-generated descriptions of what each command will do
+- **Standard File Operations**: All file modifications use standard Unix commands (`patch`, `cat`, `rm`) with clear diffs
+- **Smart Suggestions**: Alternative approaches when safer options exist
+- **Approval Options**: Approve, deny, or request modifications with a single keystroke
 
 ### Enhanced File Preview System
 
@@ -255,7 +258,7 @@ Codex lets you decide _how much autonomy_ the agent receives and auto-approval p
 | Mode                      | What the agent may do without asking                                                                | Still requires approval                                                                         |
 | ------------------------- | --------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
 | **Suggest** <br>(default) | <li>Read any file in the repo                                                                       | <li>**All** file writes/patches<li> **Any** arbitrary shell commands (aside from reading files) |
-| **Auto Edit**             | <li>Read **and** apply-patch writes to files                                                        | <li>**All** shell commands                                                                      |
+| **Auto Edit**             | <li>Read **and** write files using standard commands                                                | <li>**All** shell commands                                                                      |
 | **Full Auto**             | <li>Read/write files <li> Execute shell commands (network disabled, writes limited to your workdir) | -                                                                                               |
 
 In **Full Auto** every command is run **network-disabled** and confined to the
@@ -263,9 +266,6 @@ current working directory (plus temporary files) for defense-in-depth. Codex
 will also show a warning/confirmation if you start in **auto-edit** or
 **full-auto** while the directory is _not_ tracked by Git, so you always have a
 safety net.
-
-Coming soon: you'll be able to whitelist specific commands to auto-execute with
-the network enabled, once we're confident in additional safeguards.
 
 ### Platform sandboxing details
 
@@ -311,20 +311,19 @@ The hardening mechanism Codex uses depends on your OS:
 
 ### Interactive Commands
 
-| Command    | Purpose                      | Shortcut |
-| ---------- | ---------------------------- | -------- |
-| `/tools`   | Open agentic tools interface | -        |
-| `/clear`   | Clear conversation history   | -        |
-| `/compact` | Reduce conversation context  | -        |
-| `/help`    | Show available commands      | -        |
+| Command    | Purpose                     | Shortcut |
+| ---------- | --------------------------- | -------- |
+| `/clear`   | Clear conversation history  | -        |
+| `/compact` | Reduce conversation context | -        |
+| `/help`    | Show available commands     | -        |
 
-### Agentic Tools Shortcuts
+### Interface Shortcuts
 
-| Key | Mode             | Description                         |
-| --- | ---------------- | ----------------------------------- |
-| `1` | Tool Palette     | Browse intelligent tool suggestions |
-| `2` | Command Composer | AI-assisted command building        |
-| `3` | Session History  | View and manage past sessions       |
+| Key | Mode     | Description                         |
+| --- | -------- | ----------------------------------- |
+| `1` | Chat     | Primary conversation interface      |
+| `2` | Files    | File browser with preview and tools |
+| `3` | Reserved | Reserved for future features        |
 
 Key flags: `--model/-m`, `--approval-mode/-a`, `--quiet/-q`, and `--notify`.
 
@@ -464,26 +463,26 @@ Below are a few bite-size examples you can copy-paste. Replace the text in quote
 
 ### Basic Commands
 
-| #   | What you type                                                                   | What happens                                                               |
-| --- | ------------------------------------------------------------------------------- | -------------------------------------------------------------------------- |
-| 1   | `codex "Refactor the Dashboard component to React Hooks"`                       | Codex rewrites the class component, runs `npm test`, and shows the diff.   |
-| 2   | `codex "Generate SQL migrations for adding a users table"`                      | Infers your ORM, creates migration files, and runs them in a sandboxed DB. |
-| 3   | `codex "Write unit tests for utils/date.ts"`                                    | Generates tests, executes them, and iterates until they pass.              |
-| 4   | `codex "Bulk-rename *.jpeg -> *.jpg with git mv"`                               | Safely renames files and updates imports/usages.                           |
-| 5   | `codex "Explain what this regex does: ^(?=.*[A-Z]).{8,}$"`                      | Outputs a step-by-step human explanation.                                  |
-| 6   | `codex "Carefully review this repo, and propose 3 high impact well-scoped PRs"` | Suggests impactful PRs in the current codebase.                            |
-| 7   | `codex "Look for vulnerabilities and create a security review report"`          | Finds and explains security bugs.                                          |
-| 8   | `GEMINI_API_KEY="test_key" codex "create a todo app"`                           | Replays a previous session without consuming API credits.                  |
+| #   | What you type                                                                   | What happens                                                                                                  |
+| --- | ------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| 1   | `codex "Refactor the Dashboard component to React Hooks"`                       | Codex rewrites the class component using standard unified diffs, runs tests, and shows the changes.           |
+| 2   | `codex "Generate SQL migrations for adding a users table"`                      | Creates migration files using standard Unix commands like `cat` and `patch`, and runs them in a sandboxed DB. |
+| 3   | `codex "Write unit tests for utils/date.ts"`                                    | Generates tests using standard file creation commands, executes them, and iterates until they pass.           |
+| 4   | `codex "Bulk-rename *.jpeg -> *.jpg with git mv"`                               | Safely renames files and updates imports/usages.                                                              |
+| 5   | `codex "Explain what this regex does: ^(?=.*[A-Z]).{8,}$"`                      | Outputs a step-by-step human explanation.                                                                     |
+| 6   | `codex "Carefully review this repo, and propose 3 high impact well-scoped PRs"` | Suggests impactful PRs in the current codebase.                                                               |
+| 7   | `codex "Look for vulnerabilities and create a security review report"`          | Finds and explains security bugs.                                                                             |
+| 8   | `GEMINI_API_KEY="test_key" codex "create a todo app"`                           | Replays a previous session without consuming API credits.                                                     |
 
-### Agentic Tools Examples
+### Interface Examples
 
-| #   | What you type                    | What happens                                                                                 |
-| --- | -------------------------------- | -------------------------------------------------------------------------------------------- |
-| 9   | `/tools` then browse suggestions | Opens intelligent tool palette with context-aware recommendations for your project           |
-| 10  | Press `2` for Command Composer   | AI guides you through building complex commands with safety analysis                         |
-| 11  | Press `3` for Session History    | Browse previous Codex sessions with metadata and resumption options                          |
-| 12  | `/tools` in a React project      | Shows React-specific tools like component analysis, hook optimization, and testing utilities |
-| 13  | Command Composer for deployment  | Breaks down deployment into steps with risk assessment and timing estimates                  |
+| #   | What you type       | What happens                                                              |
+| --- | ------------------- | ------------------------------------------------------------------------- |
+| 9   | Press `1` for Chat  | Returns to primary chat interface for conversation with the AI            |
+| 10  | Press `2` for Files | Opens file browser with syntax highlighting, search, and navigation tools |
+| 11  | `f` in file preview | Toggles full-screen preview mode for better code viewing                  |
+| 12  | `Ctrl+F` in files   | Starts in-file search with real-time highlighting                         |
+| 13  | `g` + line number   | Jumps to specific line in file preview                                    |
 
 ---
 
@@ -713,7 +712,7 @@ It's possible that your [API account needs to be verified](https://help.openai.c
 <details>
 <summary>How do I stop Codex from editing my files?</summary>
 
-Codex runs model-generated commands in a sandbox. If a proposed command or file change doesn't look right, you can simply type **n** to deny the command or give the model feedback.
+Codex runs model-generated commands in a sandbox. If a proposed command or file change doesn't look right, you can simply type **n** to deny the command or give the model feedback. All file operations use standard Unix commands like `patch` and `cat` which are easy to understand and review.
 
 </details>
 <details>

@@ -1,8 +1,7 @@
+/* eslint-disable @typescript-eslint/no-explicit-any, react-hooks/exhaustive-deps */
 import type { OverlayModeType } from "./terminal-chat";
 import type { TerminalRendererOptions } from "marked-terminal";
 import type {
-  ResponseFunctionToolCallItem,
-  ResponseFunctionToolCallOutputItem,
   ResponseInputMessageItem,
   ResponseItem,
   ResponseOutputMessage,
@@ -42,11 +41,9 @@ export default function TerminalChatResponseItem({
           fileOpener={fileOpener}
         />
       );
-    // @ts-expect-error new item types aren't in SDK yet
     case "local_shell_call":
     case "function_call":
       return <TerminalChatResponseToolCall message={item} />;
-    // @ts-expect-error new item types aren't in SDK yet
     case "local_shell_call_output":
     case "function_call_output":
       return (
@@ -168,12 +165,8 @@ function TerminalChatResponseMessage({
   );
 }
 
-function TerminalChatResponseToolCall({
-  message,
-}: {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  message: ResponseFunctionToolCallItem | any;
-}) {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function TerminalChatResponseToolCall({ message }: { message: any; }) {
   let workdir: string | undefined;
   let cmdReadableText: string | undefined;
   if (message.type === "function_call") {
@@ -198,14 +191,8 @@ function TerminalChatResponseToolCall({
   );
 }
 
-function TerminalChatResponseToolCallOutput({
-  message,
-  fullStdout,
-}: {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  message: ResponseFunctionToolCallOutputItem | any;
-  fullStdout: boolean;
-}) {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function TerminalChatResponseToolCallOutput({ message, fullStdout }: { message: any; fullStdout: boolean; }) {
   // Parse the tool call output; it should be a JSON string with { output, metadata }
   let { output, metadata } = parseToolCallOutput(message.output);
   // If output itself appears to be a JSON wrapper, unwrap it
@@ -308,11 +295,12 @@ export function Markdown({
     });
     const parsed = parse(linkifiedMarkdown, { async: false }).trim();
 
-    // Remove the truncation logic
-    return parsed;
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- options is an object of primitives
+    // Apply ANSI bold for '**text**' and return
+    return parsed.replace(/\*\*(.+?)\*\*/g, (_match, p1) => chalk.bold(p1));
   }, [
     children,
+    cwd,
+    options,
     size.columns,
     size.rows,
     fileOpener,

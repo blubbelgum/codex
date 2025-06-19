@@ -39,7 +39,6 @@ import ModelOverlay from "../model-overlay.js";
 import SessionsOverlay from "../sessions-overlay.js";
 import { FileNavigator } from "../ui/file-navigator.js";
 import { FilePreview } from "../ui/file-preview.js";
-import { TaskPanel } from "../ui/task-panel.js";
 import chalk from "chalk";
 import fs from "fs/promises";
 import { Box, Text, useInput } from "ink";
@@ -56,8 +55,7 @@ export type OverlayModeType =
   | "help"
   | "diff"
   | "files"
-  | "file-search"
-  | "tasks";
+  | "file-search";
 
 type Props = {
   config: AppConfig;
@@ -208,8 +206,10 @@ export default function TerminalChat({
   const [selectedFile, setSelectedFile] = useState<string | null>(null);
   const [filesPaneFocus, setFilesPaneFocus] = useState<'navigator' | 'preview'>('navigator');
   const [fullPreviewMode, setFullPreviewMode] = useState(false);
+  
 
-  // Store the diff text when opening the diff overlay so the view isn’t
+
+  // Store the diff text when opening the diff overlay so the view isn't
   // recomputed on every re‑render while it is open.
   // diffText is passed down to the DiffOverlay component. The setter is
   // currently unused but retained for potential future updates. Prefix with
@@ -230,8 +230,8 @@ export default function TerminalChat({
         setFullPreviewMode(false); // Reset full preview mode
     }
   }, { 
-    // Always active to allow switching back to chat from any mode
-    isActive: true
+    // Only active when not in normal chat mode to avoid interfering with typing
+    isActive: overlayMode !== "none"
   });
 
   // Handle keyboard shortcuts for tabs and navigation within overlays
@@ -240,9 +240,9 @@ export default function TerminalChat({
       if (input === '2') {
         setOverlayMode("files");
         setFilesPaneFocus('navigator'); // Start with navigator focus
-        setFullPreviewMode(false); // Start in split view mode
+                setFullPreviewMode(false); // Start in split view mode
       } else if (input === '3') {
-        setOverlayMode("tasks");
+        // Key '3' reserved for future features
       } else if (overlayMode === "files" && key.tab) {
         // Tab key switches focus between navigator and preview in files mode
         setFilesPaneFocus(prev => prev === 'navigator' ? 'preview' : 'navigator');
@@ -270,8 +270,8 @@ export default function TerminalChat({
     }
   }, { 
     // Only handle input when not in chat mode (to prevent interfering with chat input)
-    // or when in files/tasks mode where we need to handle navigation
-    isActive: overlayMode === "files" || overlayMode === "tasks"
+    // or when in files mode where we need to handle navigation
+    isActive: overlayMode === "files"
   });
 
   // Keep a single AgentLoop instance alive across renders;
@@ -444,7 +444,7 @@ export default function TerminalChat({
       forceUpdate(); // re‑render after teardown too
     };
     // We intentionally omit 'approvalPolicy' and 'confirmationPrompt' from the deps
-    // so switching modes or showing confirmation dialogs doesn’t tear down the loop.
+    // so switching modes or showing confirmation dialogs doesn't tear down the loop.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [model, provider, config, requestConfirmation, additionalWritableRoots]);
 
@@ -655,7 +655,7 @@ export default function TerminalChat({
             openApprovalOverlay={() => setOverlayMode("approval")}
             openHelpOverlay={() => setOverlayMode("help")}
             openSessionsOverlay={() => setOverlayMode("sessions")}
-            _openAgenticOverlay={() => {}}
+
             openDiffOverlay={() => {
               const { isGitRepo, diff } = getGitDiff();
               let text: string;
@@ -715,9 +715,7 @@ export default function TerminalChat({
               setFilesPaneFocus('navigator');
               setFullPreviewMode(false);
             }}
-            onSwitchToTasks={() => {
-              setOverlayMode("tasks");
-            }}
+
           />
         )}
         {overlayMode === "history" && (
@@ -908,7 +906,7 @@ export default function TerminalChat({
                   <Text color="cyan" bold>[2] Files</Text>
                 </Box>
                 <Box marginLeft={2}>
-                  <Text color="gray">[3] Tasks</Text>
+                  <Text color="gray">[3] Reserved</Text>
                 </Box>
                 <Box flexGrow={1} />
                 <Text color="gray" dimColor>Press 1-3 to switch | Tab: switch panes | b: browse files | Esc: close</Text>
@@ -963,26 +961,9 @@ export default function TerminalChat({
           </Box>
         )}
 
-        {overlayMode === "tasks" && (
-          <Box flexDirection="column">
-            <Box borderStyle="single" paddingX={2} height={3}>
-              <Text color="gray">[1] Chat</Text>
-              <Box marginLeft={2}>
-                <Text color="gray">[2] Files</Text>
-              </Box>
-              <Box marginLeft={2}>
-                <Text color="cyan" bold>[3] Tasks</Text>
-              </Box>
-              <Box flexGrow={1} />
-              <Text color="gray" dimColor>Press 1-3 to switch | Esc to close</Text>
-            </Box>
-            <TaskPanel
-              onTaskSelect={() => {}}
-              isActive={true}
-              height={25}
-            />
-          </Box>
-        )}
+
+
+
 
 
       </Box>

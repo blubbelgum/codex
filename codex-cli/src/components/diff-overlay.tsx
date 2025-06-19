@@ -51,18 +51,30 @@ export default function DiffOverlay({
   );
   const visible = lines.slice(firstVisible, firstVisible + maxVisible);
 
-  // Very small helper to colorize diff lines in a basic way.
+  // Enhanced diff line colorization with background highlighting for better visibility
   function renderLine(line: string, idx: number): JSX.Element {
-    let color: "green" | "red" | "cyan" | undefined = undefined;
-    if (line.startsWith("+")) {
-      color = "green";
-    } else if (line.startsWith("-")) {
-      color = "red";
-    } else if (line.startsWith("@@") || line.startsWith("diff --git")) {
+    let color: "green" | "red" | "cyan" | "yellow" | "black" | "white" | undefined = undefined;
+    let backgroundColor: "green" | "red" | "blue" | undefined = undefined;
+    let bold = false;
+    
+    if (line.startsWith("+") && !line.startsWith("+++")) {
+      color = "black";
+      backgroundColor = "green";
+    } else if (line.startsWith("-") && !line.startsWith("---")) {
+      color = "white";
+      backgroundColor = "red";
+    } else if (line.startsWith("@@")) {
+      color = "cyan";
+      bold = true;
+    } else if (line.startsWith("diff --git") || line.startsWith("index ")) {
+      color = "yellow";
+      bold = true;
+    } else if (line.startsWith("+++") || line.startsWith("---")) {
       color = "cyan";
     }
+    
     return (
-      <Text key={idx} color={color} wrap="truncate-end">
+      <Text key={idx} color={color} backgroundColor={backgroundColor} bold={bold} wrap="truncate-end">
         {line === "" ? " " : line}
       </Text>
     );

@@ -88,35 +88,35 @@ const cliPromise = esbuild
   });
 
 // Build Vim Bridge
-const bridgePromise = esbuild
-  .build({
-    entryPoints: ["src/vim-bridge.ts"],
-    bundle: true,
-    format: "esm",
-    platform: "node",
-    tsconfig: "tsconfig.json",
-    outfile: `${OUT_DIR}/vim-bridge.js`,
-    minify: !isDevBuild,
-    sourcemap: isDevBuild ? "inline" : true,
-    inject: ["./require-shim.js"],
-  })
-  .then(async () => {
-    // Add shebang after build to avoid ESM issues
-    const bridgeFile = path.resolve(`${OUT_DIR}/vim-bridge.js`);
-    let code = await fs.promises.readFile(bridgeFile, "utf8");
+// const bridgePromise = esbuild
+//   .build({
+//     entryPoints: ["src/vim-bridge.ts"],
+//     bundle: true,
+//     format: "esm",
+//     platform: "node",
+//     tsconfig: "tsconfig.json",
+//     outfile: `${OUT_DIR}/vim-bridge.js`,
+//     minify: !isDevBuild,
+//     sourcemap: isDevBuild ? "inline" : true,
+//     inject: ["./require-shim.js"],
+//   })
+//   .then(async () => {
+//     // Add shebang after build to avoid ESM issues
+//     const bridgeFile = path.resolve(`${OUT_DIR}/vim-bridge.js`);
+//     let code = await fs.promises.readFile(bridgeFile, "utf8");
     
-    // Remove any existing shebangs first
-    code = code.replace(/^#!.*\n/gm, '');
+//     // Remove any existing shebangs first
+//     code = code.replace(/^#!.*\n/gm, '');
     
-    // Add single shebang at the beginning
-    code = "#!/usr/bin/env node\n" + code;
+//     // Add single shebang at the beginning
+//     code = "#!/usr/bin/env node\n" + code;
     
-    await fs.promises.writeFile(bridgeFile, code, "utf8");
+//     await fs.promises.writeFile(bridgeFile, code, "utf8");
     
-    // Make executable
-    await fs.promises.chmod(bridgeFile, 0o755);
-  });
+//     // Make executable
+//     await fs.promises.chmod(bridgeFile, 0o755);
+//   });
 
 // Wait for both builds to complete
-Promise.all([cliPromise, bridgePromise])
+Promise.all([cliPromise])
   .catch(() => process.exit(1));

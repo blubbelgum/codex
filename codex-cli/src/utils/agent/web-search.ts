@@ -39,7 +39,7 @@ export class WebSearchEngine {
   }
 
   /**
-   * Perform a web search with enhanced query processing
+   * Perform a web search with query processing
    */
   async search(searchQuery: WebSearchQuery): Promise<Array<WebSearchResult>> {
     const enhancedQuery = this.enhanceQuery(searchQuery);

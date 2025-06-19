@@ -4,11 +4,12 @@ export enum SandboxType {
   LINUX_LANDLOCK = "linux.landlock",
 }
 
-export type ExecInput = {
+export interface ExecInput {
   cmd: Array<string>;
-  workdir: string | undefined;
-  timeoutInMillis: number | undefined;
-};
+  workdir?: string;
+  timeoutInMillis?: number;
+  additionalWritableRoots?: Array<string>;
+}
 
 /**
  * Result of executing a command. Caller is responsible for checking `code` to

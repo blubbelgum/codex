@@ -8,19 +8,19 @@ import { ErrorSuggestionEngine } from "../../utils/error-suggestions.js";
 import { Box, Text, useInput } from "ink";
 import React, { useState, useEffect } from "react";
 
-export interface EnhancedApprovalDialogProps {
+export interface ApprovalDialogProps {
   command: Array<string>;
   applyPatch?: ApplyPatchCommand;
   onDecision: (confirmation: CommandConfirmation) => void;
   autoApprove?: boolean;
 }
 
-export default function EnhancedApprovalDialog({
+export default function ApprovalDialog({
   command,
   applyPatch,
   onDecision,
   autoApprove = false,
-}: EnhancedApprovalDialogProps): React.ReactElement {
+}: ApprovalDialogProps): React.ReactElement {
   const [showDetails, setShowDetails] = useState(false);
   const [explanation, setExplanation] = useState("");
 

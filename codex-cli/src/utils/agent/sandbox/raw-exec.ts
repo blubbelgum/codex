@@ -18,18 +18,18 @@ import * as os from "os";
  * This function should never return a rejected promise: errors should be
  * mapped to a non-zero exit code and the error message should be in stderr.
  */
-export function exec(
-  command: Array<string>,
-  options: SpawnOptions,
+export async function rawExec(
+  cmd: Array<string>,
+  opts: SpawnOptions,
   config: AppConfig,
   abortSignal?: AbortSignal,
 ): Promise<ExecResult> {
   // Adapt command for the current platform (e.g., convert 'ls' to 'dir' on Windows)
-  const adaptedCommand = adaptCommandForPlatform(command);
+  const adaptedCommand = adaptCommandForPlatform(cmd);
 
-  if (JSON.stringify(adaptedCommand) !== JSON.stringify(command)) {
+  if (JSON.stringify(adaptedCommand) !== JSON.stringify(cmd)) {
     log(
-      `Command adapted for platform: ${command.join(
+      `Command adapted for platform: ${cmd.join(
         " ",
       )} -> ${adaptedCommand.join(" ")}`,
     );
@@ -73,7 +73,7 @@ export function exec(
     StdioPipe,
     StdioPipe
   > = {
-    ...options,
+    ...opts,
     // Inherit any caller‑supplied stdio flags but force stdin to "ignore" so
     // the child never attempts to read from us (see lengthy comment above).
     stdio: ["ignore", "pipe", "pipe"],
@@ -236,3 +236,5 @@ function addTruncationWarningsIfNecessary(
     };
   }
 }
+
+export { rawExec as exec };

@@ -31,7 +31,6 @@ import {
   setCurrentModel,
   setSessionId,
 } from "../session.js";
-import { applyPatchToolInstructions } from "./apply-patch.js";
 import { handleExecCommand } from "./handle-exec-command.js";
 import { smartWebSearch, formatSearchResults } from "./web-search.js";
 import { HttpsProxyAgent } from "https-proxy-agent";
@@ -58,6 +57,9 @@ export type CommandConfirmation = {
 
 const alreadyProcessedResponses = new Set();
 const alreadyStagedItemIds = new Set<string>();
+
+// Temporary stub for legacy apply_patch instructions, until migration to unified diff is complete
+const applyPatchToolInstructions: string = "";
 
 type AgentLoopParams = {
   model: string;
@@ -157,80 +159,10 @@ const webSearchFunctionTool: FunctionTool = {
   },
 };
 
-const taskManagementFunctionTool: FunctionTool = {
-  type: "function",
-  name: "task_management",
-  description:
-    "Manage project tasks and get AI-powered recommendations. Use for task creation, listing, completion tracking, project analysis, and getting next task recommendations.",
-  strict: false,
-  parameters: {
-    type: "object",
-    properties: {
-      action: {
-        type: "string",
-        enum: ["init", "list", "add", "next", "complete", "analyze", "status", "prd", "help"],
-        description: "The task management action to perform",
-      },
-      title: {
-        type: "string",
-        description: "Task title (required for 'add' action)",
-      },
-      description: {
-        type: "string",
-        description: "Task description (optional for 'add' action)",
-      },
-      taskId: {
-        type: "number",
-        description: "Task ID (required for 'complete' and 'status' actions)",
-      },
-      status: {
-        type: "string",
-        enum: ["pending", "in_progress", "completed", "blocked"],
-        description: "New task status (required for 'status' action)",
-      },
-      priority: {
-        type: "string",
-        enum: ["low", "medium", "high", "critical"],
-        description: "Task priority (optional for 'add' action, filter for 'list')",
-      },
-      complexity: {
-        type: "number",
-        minimum: 1,
-        maximum: 10,
-        description: "Task complexity 1-10 (optional for 'add' action)",
-      },
-      tags: {
-        type: "array",
-        items: { type: "string" },
-        description: "Task tags (optional for 'add' action)",
-      },
-      dependencies: {
-        type: "array",
-        items: { type: "number" },
-        description: "Task dependency IDs (optional for 'add' action)",
-      },
-      projectName: {
-        type: "string",
-        description: "Project name (optional for 'init' action)",
-      },
-      filterStatus: {
-        type: "string",
-        enum: ["pending", "in_progress", "completed", "blocked"],
-        description: "Filter tasks by status (optional for 'list' action)",
-      },
-      filterTag: {
-        type: "string",
-        description: "Filter tasks by tag (optional for 'list' action)",
-      },
-    },
-    required: ["action"],
-    additionalProperties: false,
-  },
-};
+
 
 const localShellTool: Tool = {
-  //@ts-expect-error - waiting on sdk
-  type: "local_shell",
+  type: "local_shell" as const,
 };
 
 
@@ -584,7 +516,9 @@ export class AgentLoop {
     const callId: string = (item as any).call_id ?? (item as any).id;
 
     // Parse arguments differently based on the tool type
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     let args: any = null;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     let parsedArgs: any = null;
     
     try {
@@ -615,9 +549,11 @@ export class AgentLoop {
       // Provide specific error messages for common mistakes
       let errorMessage = `Invalid command arguments: ${rawArguments}`;
       try {
-        if (parsedArgs.patch && !parsedArgs.cmd && !parsedArgs.command) {
-          errorMessage = `Error: Found "patch" parameter instead of "cmd". Correct format: {"cmd":["apply_patch", "*** Begin Patch\\n*** Add File: filename\\n+file content\\n*** End Patch"]}`;
-        } else if (!parsedArgs.cmd && !parsedArgs.command) {
+        if (parsedArgs && typeof parsedArgs === 'object' && 
+            'patch' in parsedArgs && !('cmd' in parsedArgs) && !('command' in parsedArgs)) {
+          errorMessage = `Error: Found "patch" parameter instead of "cmd". Correct format: {"cmd":["patch", "filename", "<<EOF\\n--- a/filename\\n+++ b/filename\\n@@ -1,1 +1,1 @@\\n-old content\\n+new content\\nEOF"]}`;
+        } else if (parsedArgs && typeof parsedArgs === 'object' && 
+                   !('cmd' in parsedArgs) && !('command' in parsedArgs)) {
           errorMessage = `Error: Missing "cmd" parameter. Use {"cmd":["command_name", "arg1", "arg2"]} format.`;
         }
       } catch {
@@ -679,6 +615,7 @@ export class AgentLoop {
     } else if (name === "web_search") {
       try {
         const startTime = Date.now();
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const webSearchArgs = args as any;
         const { query, intent = "general", maxResults = 10, timeRange = "all" } = webSearchArgs;
         
@@ -716,76 +653,6 @@ export class AgentLoop {
         const duration = (Date.now() - Date.now()) / 1000;
         outputItem.output = JSON.stringify({
           output: `Web search failed: ${error instanceof Error ? error.message : 'Unknown error'}`,
-          metadata: { exit_code: 1, duration_seconds: duration },
-        });
-      }
-    } else if (name === "task_management") {
-      const startTime = Date.now();
-      try {
-        const taskArgs = args as any;
-        
-        if (!taskArgs || typeof taskArgs !== "object") {
-          outputItem.output = JSON.stringify({
-            output: "Error: Invalid task management arguments",
-            metadata: { exit_code: 1, duration_seconds: 0 },
-          });
-        } else {
-          const { action, title, description, taskId, status, priority, projectName, filterStatus, filterTag } = taskArgs;
-        
-          if (!action || typeof action !== "string") {
-          outputItem.output = JSON.stringify({
-            output: "Error: 'action' parameter is required and must be a string",
-            metadata: { exit_code: 1, duration_seconds: 0 },
-          });
-          } else {
-            // Import and use the task command handler
-            const { handleTaskCommand } = await import("../task-command-handler.js");
-          
-            // Build command string based on action and parameters
-            let commandString = `/task ${action}`;
-          
-            switch (action) {
-              case "init":
-                if (projectName) {commandString += ` ${projectName}`;}
-                break;
-              case "add":
-                if (title) {
-                  commandString += ` "${title}"`;
-                  if (description) {commandString += ` ${description}`;}
-                }
-                break;
-              case "complete":
-              case "status":
-                if (taskId !== undefined) {
-                  commandString += ` ${taskId}`;
-                  if (action === "status" && status) {commandString += ` ${status}`;}
-                }
-                break;
-              case "list":
-                if (filterStatus) {commandString += ` --status ${filterStatus}`;}
-                if (priority) {commandString += ` --priority ${priority}`;}
-                if (filterTag) {commandString += ` --tag ${filterTag}`;}
-                break;
-            }
-          
-            const result = await handleTaskCommand(commandString);
-            const duration = (Date.now() - startTime) / 1000;
-
-            outputItem.output = JSON.stringify({
-              output: result.output,
-              metadata: { 
-                exit_code: result.success ? 0 : 1, 
-                duration_seconds: duration,
-                task_count: result.metadata?.task_count,
-                task_id: result.metadata?.task_id,
-              },
-            });
-          }
-        }
-      } catch (error) {
-        const duration = (Date.now() - startTime) / 1000;
-        outputItem.output = JSON.stringify({
-          output: `Task management failed: ${error instanceof Error ? error.message : 'Unknown error'}`,
           metadata: { exit_code: 1, duration_seconds: duration },
         });
       }
@@ -945,12 +812,12 @@ export class AgentLoop {
       // `disableResponseStorage === true`.
       let transcriptPrefixLen = 0;
 
-      let tools: Array<Tool> = [shellFunctionTool, webSearchFunctionTool, taskManagementFunctionTool];
+      let tools: Array<Tool> = [shellFunctionTool, webSearchFunctionTool];
       if (this.model.startsWith("codex")) {
-        tools = [localShellTool, webSearchFunctionTool, taskManagementFunctionTool];
+        tools = [localShellTool, webSearchFunctionTool];
       } else if (this.provider.toLowerCase() === "gemini") {
         // Use standard tools for Gemini with enhanced search capabilities
-        tools = [shellFunctionTool, webSearchFunctionTool, taskManagementFunctionTool];
+        tools = [shellFunctionTool, webSearchFunctionTool];
       }
 
       const stripInternalFields = (
@@ -1059,7 +926,6 @@ export class AgentLoop {
                 if (
                   (item as ResponseInputItem).type === "function_call" ||
                   (item as ResponseInputItem).type === "reasoning" ||
-                  //@ts-expect-error - waiting on sdk
                   (item as ResponseInputItem).type === "local_shell_call" ||
                   ((item as ResponseInputItem).type === "message" &&
                     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -1133,8 +999,8 @@ export class AgentLoop {
               .join("\n");
 
             const responseCall =
-              !this.config.provider ||
-              this.config.provider?.toLowerCase() === "openai"
+              !this.provider ||
+              this.provider.toLowerCase() === "openai"
                 ? (params: ResponseCreateParams) =>
                     this.oai.responses.create(params)
                 : (params: ResponseCreateParams) =>
@@ -1521,8 +1387,8 @@ export class AgentLoop {
                 .join("\n");
 
               const responseCall =
-                !this.config.provider ||
-                this.config.provider?.toLowerCase() === "openai"
+                !this.provider ||
+                this.provider.toLowerCase() === "openai"
                   ? (params: ResponseCreateParams) =>
                       this.oai.responses.create(params)
                   : (params: ResponseCreateParams) =>
@@ -1912,13 +1778,10 @@ export class AgentLoop {
         // eslint-disable-next-line no-await-in-loop
         const result = await this.handleFunctionCall(item);
         turnInput.push(...result);
-        //@ts-expect-error - waiting on sdk
       } else if (item.type === "local_shell_call") {
-        //@ts-expect-error - waiting on sdk
         if (alreadyProcessedResponses.has(item.id)) {
           continue;
         }
-        //@ts-expect-error - waiting on sdk
         alreadyProcessedResponses.add(item.id);
         // eslint-disable-next-line no-await-in-loop
         const result = await this.handleLocalShellCall(item);
@@ -1947,8 +1810,8 @@ if (isWindows) {
   dynamicLines.push(
     "IMPORTANT: You are running on Windows. Follow these guidelines:",
     "- Most Unix commands are automatically translated (ls→dir, cat→type, grep→findstr)",
-    "- For file creation, ALWAYS use apply_patch - it's the most reliable method",
-    '- Example: {"cmd":["apply_patch","*** Begin Patch\\n*** Add File: hello.js\\n+console.log(\'Hello World\');\\n*** End Patch"]}',
+    "- For file creation, use the same file operation commands as on Unix systems",
+    "- For example, to create a new file: cat <<'EOF' > hello.js\\nconsole.log('Hello World');\\nEOF",
     "- File paths use backslashes (\\) but forward slashes (/) also work",
     "- Never concatenate multiple commands in one function call - use one command at a time",
   );
@@ -1988,35 +1851,98 @@ You MUST adhere to the following criteria when executing the task:
 - Analyzing code for vulnerabilities is allowed.
 - Showing user code and tool call details is allowed.
 - User instructions may overwrite the *CODING GUIDELINES* section in this developer message.
-- To CREATE files: {"cmd":["apply_patch","*** Begin Patch\\n*** Add File: filename.js\\n+file content here\\n*** End Patch"]}
-- To EDIT files: {"cmd":["apply_patch","*** Begin Patch\\n*** Update File: filename.js\\n@@ context\\n-old line\\n+new line\\n*** End Patch"]}
-- To RUN commands: {"cmd":["node","filename.js"]} or {"cmd":["ls","-la"]}
-- CRITICAL: Use "cmd" array format - never use "patch" parameter or concatenate commands
-- NEVER use single character commands like "$", ">", or "#" - these are shell prompts, not commands
-- Execute ONE command per function call - do not combine multiple commands
-- If completing the user's task requires writing or modifying files:
-    - Your code and final answer should follow these *CODING GUIDELINES*:
-        - Fix the problem at the root cause rather than applying surface-level patches, when possible.
-        - Avoid unneeded complexity in your solution.
-            - Ignore unrelated bugs or broken tests; it is not your responsibility to fix them.
-        - Update documentation as necessary.
-        - Keep changes consistent with the style of the existing codebase. Changes should be minimal and focused on the task.
-            - Use \`git log\` and \`git blame\` to search the history of the codebase if additional context is required; internet access is disabled.
-        - NEVER add copyright or license headers unless specifically requested.
-        - You do not need to \`git commit\` your changes; this will be done automatically for you.
-        - If there is a .pre-commit-config.yaml, use \`pre-commit run --files ...\` to check that your changes pass the pre-commit checks. However, do not fix pre-existing errors on lines you didn't touch.
-            - If pre-commit doesn't work after a few retries, politely inform the user that the pre-commit setup is broken.
-        - Once you finish coding, you must
-            - Remove all inline comments you added as much as possible, even if they look normal. Check using \`git diff\`. Inline comments must be generally avoided, unless active maintainers of the repo, after long careful study of the code and the issue, will still misinterpret the code without the comments.
-            - Check if you accidentally add copyright or license headers. If so, remove them.
-            - Try to run pre-commit if it is available.
-            - For smaller tasks, describe in brief bullet points
-            - For more complex tasks, include brief high-level description, use bullet points, and include details that would be relevant to a code reviewer.
-- If completing the user's task DOES NOT require writing or modifying files (e.g., the user asks a question about the code base):
-    - Respond in a friendly tone as a remote teammate, who is knowledgeable, capable and eager to help with coding.
-- When your task involves writing or modifying files:
-    - Do NOT tell the user to "save the file" or "copy the code into a file" if you already created or modified the file using \`apply_patch\`. Instead, reference the file as already saved.
-    - Do NOT show the full contents of large files you have already written, unless the user explicitly asks for them.
+
+# AGENTLESS SKELETON STRATEGY
+
+## Three-Phase Hierarchical Localization:
+Based on proven Agentless research, use this structured approach for maximum efficiency:
+
+### Phase 1: Repository Structure (Skeleton Format)
+- **Tree Discovery**: \`find . -type f -name "*.{common_extensions}" | head -20\` to understand organization
+- **Entry Point Identification**: Look for main files, config files, package manifests
+- **Directory Mapping**: \`ls -la\` key directories to understand project layout
+- **Skeleton Extraction**: Extract high-level structure without diving into implementation details
+
+### Phase 2: File-Level Localization (Headers & Signatures)
+- **Function/Class Headers**: \`grep -n "^(function|class|def|export)" target_files\` for API discovery  
+- **Import Analysis**: \`grep -n "^(import|require|include)" target_files\` for dependencies
+- **Type Definitions**: \`grep -n "^(type|interface|struct)" target_files\` for data structures
+- **Compressed Representation**: Focus on declarations, not implementations
+
+### Phase 3: Targeted Implementation Details
+- **Precision Reading**: Only after understanding structure, read specific implementation details
+- **Context-Aware Editing**: Make minimal changes that respect existing architecture
+- **Boundary Respect**: Understand semantic boundaries before modifying code
+
+## File Reading Strategy (Inspired by Agentless):
+
+### Unknown Codebase Exploration:
+1. **Structure First**: \`find . -type f -name "*.*" | head -15\` 
+2. **Skeleton Scan**: \`head -30 important_file && tail -10 important_file\`
+3. **Pattern Search**: \`grep -n "TODO\\|FIXME\\|BUG\\|NOTE" relevant_files\`
+4. **Recent Context**: \`git log --oneline -5 file\` for change history
+
+### Large File Handling (>500 lines):
+1. **Header Analysis**: \`head -50 file\` to understand purpose
+2. **Structure Extraction**: \`grep -n "^[[:space:]]*(function|class|export)" file\`
+3. **Targeted Reading**: Jump to specific sections only after understanding overall structure
+4. **Incremental Loading**: Read around target areas with sufficient context
+
+### Compression-First Approach:
+- Extract essential information using grep patterns
+- Focus on signatures over implementations initially  
+- Build mental model before diving deep
+- Use search to locate specific functionality
+
+# FILE OPERATIONS - CRITICAL REQUIREMENTS
+
+**FORBIDDEN**: Never use apply_patch, patch, or "*** Begin Patch" format - these are deprecated.
+
+**REQUIRED FORMAT**:
+
+### Create Files:
+\`\`\`bash
+write_to_file filename <<'EOF'
+complete_file_content
+EOF
+\`\`\`
+
+### Modify Files:
+\`\`\`bash
+replace_in_file filename <<'EOF'
+------- SEARCH
+exact_content_to_find
+=======
+new_content_to_replace_with
++++++++ REPLACE
+EOF
+\`\`\`
+
+### Strategic Reading:
+\`\`\`bash
+# Get file overview
+head -50 filename && echo "..." && tail -20 filename
+
+# Find patterns
+grep -n "pattern" filename
+
+# Extract structure
+grep -n "^(class|function|export|def)" filename
+\`\`\`
+
+## Core Principles:
+1. **Skeleton Before Details**: Always understand high-level structure first
+2. **Minimal Context**: Read just enough to solve the problem  
+3. **Pattern Recognition**: Use grep/search to locate targets efficiently
+4. **Incremental Understanding**: Build knowledge layer by layer
+5. **Respect Boundaries**: Understand code organization before modifying
+
+## Efficiency Guidelines:
+- Use compressed file representations when possible
+- Extract function signatures before reading implementations
+- Search for specific patterns rather than reading entire files
+- Understand project structure before making any modifications
+- Validate changes incrementally with appropriate test commands
 
 ${dynamicPrefix}`;
 
