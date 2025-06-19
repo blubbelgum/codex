@@ -25,9 +25,15 @@ import type { AppConfig } from "./utils/config";
 import type { ResponseItem } from "openai/resources/responses/responses";
 import type { ReasoningEffort } from "openai/resources.mjs";
 
+type ExecOutputMetadata = {
+  exit_code?: number;
+  duration_seconds?: number;
+};
+
 import App from "./app";
 import { runSinglePass } from "./cli-singlepass";
 import SessionsOverlay from "./components/sessions-overlay.js";
+import { formatCommandForDisplay } from "./format-command.js";
 import { AgentLoop } from "./utils/agent/agent-loop";
 import { ReviewDecision } from "./utils/agent/review";
 import { createRolloutAwareAgentLoop } from "./utils/agent/rollout-agent-loop";
@@ -685,9 +691,7 @@ function formatResponseItemForQuietMode(item: ResponseItem): string {
       try {
         const p = JSON.parse(item.output);
         if (p && typeof p === 'object') {
-          // @ts-expect-error
           textOut = p.output ?? textOut;
-          // @ts-expect-error
           meta = p.metadata;
         }
       } catch {

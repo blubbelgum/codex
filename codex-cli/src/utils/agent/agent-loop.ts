@@ -58,8 +58,25 @@ export type CommandConfirmation = {
 const alreadyProcessedResponses = new Set();
 const alreadyStagedItemIds = new Set<string>();
 
-// Temporary stub for legacy apply_patch instructions, until migration to unified diff is complete
-const applyPatchToolInstructions: string = "";
+// File operations instructions for unified diff format
+const fileOperationsInstructions = `
+**CRITICAL: Shell Tool File Operations**
+
+When using the shell tool for file operations, use EXACTLY this format:
+
+### Create Files:
+{"command": ["bash", "-c", "write_to_file filename <<'EOF'\\nfile_content\\nEOF"]}
+
+### Modify Files: 
+{"command": ["bash", "-c", "replace_in_file filename <<'EOF'\\n------- SEARCH\\nexact_content\\n=======\\nnew_content\\n+++++++ REPLACE\\nEOF"]}
+
+### Read Files:
+{"command": ["cat", "filename"]} or {"command": ["head", "-50", "filename"]}
+
+**CRITICAL**: The bash -c wrapper is required for write_to_file and replace_in_file commands.
+
+**FORBIDDEN**: Never use apply_patch, patch, or "*** Begin Patch" format - these are deprecated.
+`;
 
 type AgentLoopParams = {
   model: string;
@@ -93,7 +110,7 @@ const shellFunctionTool: FunctionTool = {
   type: "function",
   name: "shell",
   description:
-    "Runs a shell command, and returns its output. The command must be an array of strings where the first element is the executable name (like 'ls', 'node', 'cat') and subsequent elements are arguments.",
+    "Runs a shell command, and returns its output. For file operations, use the unified diff format: write_to_file or replace_in_file wrapped in bash -c with heredoc syntax. For regular commands, use array format.",
   strict: false,
   parameters: {
     type: "object",
@@ -102,7 +119,7 @@ const shellFunctionTool: FunctionTool = {
         type: "array",
         items: { type: "string" },
         description:
-          "Array of command and arguments. First element must be the executable name (e.g., ['ls', '-la'] or ['node', 'file.js']). Never use shell prompts like '$', '>', or '#'.",
+          "Array of command and arguments. For file operations: ['bash', '-c', 'write_to_file filename <<\\\"EOF\\\"\\ncontents\\nEOF'] or ['bash', '-c', 'replace_in_file filename <<\\\"EOF\\\"\\n------- SEARCH\\nold\\n=======\\nnew\\n+++++++ REPLACE\\nEOF']. For regular commands: ['ls', '-la'] or ['node', 'file.js']. Never use shell prompts like '$', '>', or '#'.",
       },
       workdir: {
         type: "string",
@@ -988,10 +1005,11 @@ export class AgentLoop {
               reasoning.summary = "auto";
             }
             if (this.model.startsWith("gpt-4.1")) {
-              modelSpecificInstructions = applyPatchToolInstructions;
+              modelSpecificInstructions = fileOperationsInstructions;
             }
             const mergedInstructions = [
               prefix,
+              fileOperationsInstructions,
               modelSpecificInstructions,
               this.instructions,
             ]
@@ -1898,25 +1916,13 @@ Based on proven Agentless research, use this structured approach for maximum eff
 
 **FORBIDDEN**: Never use apply_patch, patch, or "*** Begin Patch" format - these are deprecated.
 
-**REQUIRED FORMAT**:
+**REQUIRED FORMAT**: Always wrap file operations in bash -c with proper heredoc syntax:
 
 ### Create Files:
-\`\`\`bash
-write_to_file filename <<'EOF'
-complete_file_content
-EOF
-\`\`\`
+Use shell tool with: ["bash", "-c", "write_to_file filename <<'EOF'\\nfile_content\\nEOF"]
 
 ### Modify Files:
-\`\`\`bash
-replace_in_file filename <<'EOF'
-------- SEARCH
-exact_content_to_find
-=======
-new_content_to_replace_with
-+++++++ REPLACE
-EOF
-\`\`\`
+Use shell tool with: ["bash", "-c", "replace_in_file filename <<'EOF'\\n------- SEARCH\\nexact_content\\n=======\\nnew_content\\n+++++++ REPLACE\\nEOF"]
 
 ### Strategic Reading:
 \`\`\`bash
