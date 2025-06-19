@@ -963,7 +963,7 @@ export default function TerminalChatInput({
   return (
     <Box flexDirection="column">
       {/* Focus indicator */}
-      <Box paddingX={2} marginBottom={1}>
+      <Box paddingX={1}>
         <Text color={inputFocused ? "green" : "yellow"}>
           {inputFocused ? "● FOCUSED" : "○ UNFOCUSED"} - Chat Input
         </Text>

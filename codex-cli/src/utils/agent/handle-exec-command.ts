@@ -8,7 +8,7 @@ import { formatCommandForDisplay } from "../../format-command.js";
 import { FullAutoErrorMode } from "../auto-approval-mode.js";
 import { CODEX_UNSAFE_ALLOW_NO_SANDBOX, type AppConfig } from "../config.js";
 import { exec } from "./exec.js";
-import { applySearchReplaceDiff, writeToFile } from "./handle-unified-diff.js";
+import { applySearchReplaceDiff, writeToFile, readFile } from "./handle-unified-diff.js";
 import { adaptCommandForPlatform } from "./platform-commands.js";
 import { ReviewDecision } from "./review.js";
 import { isLoggingEnabled, log } from "../logger/log.js";
@@ -300,13 +300,61 @@ export async function handleExecCommand(
       }
     }
     
+    // Check for read_file command
+    if (bashScript.includes("read_file")) {
+      try {
+        const match = bashScript.match(/read_file\s+(\S+)/);
+        if (match && match[1]) {
+          const filePath = match[1];
+          const result = readFile(filePath, workdir);
+          return {
+            outputText: JSON.stringify({
+              output: result,
+              metadata: { operation: "read_file", file: filePath, size: result.length }
+            }),
+            metadata: { operation: "read_file", file: filePath, size: result.length }
+          };
+        }
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        return {
+          outputText: JSON.stringify({
+            output: `Error: ${errorMessage}`,
+            metadata: { error: "read_file_failed" }
+          }),
+          metadata: { error: "read_file_failed" }
+        };
+      }
+    }
+    
     // Check for replace_in_file command
     if (bashScript.includes("replace_in_file")) {
       try {
-        const match = bashScript.match(/replace_in_file\s+(\S+)\s+<<'EOF'\n(.*)\nEOF/s);
-        if (match && match[1] && match[2] !== undefined) {
-          const filePath = match[1];
-          const diffContent = match[2];
+        // Try multiple regex patterns to handle different quote styles and formatting
+        const patterns = [
+          /replace_in_file\s+(\S+)\s+<<'EOF'\n(.*?)\nEOF/s,
+          /replace_in_file\s+(\S+)\s+<<"EOF"\n(.*?)\nEOF/s,
+          /replace_in_file\s+(\S+)\s+<<EOF\n(.*?)\nEOF/s,
+          /replace_in_file\s+(\S+)\s+<<'EOF'([\s\S]*?)EOF/s,
+          /replace_in_file\s+([^\s]+)\s+<<'EOF'([\s\S]*?)EOF/s,
+        ];
+        
+        let match = null;
+        let diffContent = "";
+        let filePath = "";
+        
+        for (const pattern of patterns) {
+          match = bashScript.match(pattern);
+          if (match && match[1] && match[2] !== undefined) {
+            filePath = match[1];
+            diffContent = match[2];
+            // Clean up the diff content - remove leading/trailing whitespace lines
+            diffContent = diffContent.replace(/^\n+/, '').replace(/\n+$/, '');
+            break;
+          }
+        }
+        
+        if (match && filePath && diffContent) {
           const result = applySearchReplaceDiff(filePath, diffContent, workdir);
           return {
             outputText: JSON.stringify({
@@ -314,6 +362,15 @@ export async function handleExecCommand(
               metadata: { operation: "replace_in_file", file: filePath }
             }),
             metadata: { operation: "replace_in_file", file: filePath }
+          };
+        } else {
+          // Enhanced error message with debugging info
+          return {
+            outputText: JSON.stringify({
+              output: `Error: Could not parse replace_in_file command. Script preview:\n${bashScript.slice(0, 500)}...`,
+              metadata: { error: "replace_in_file_parse_failed" }
+            }),
+            metadata: { error: "replace_in_file_parse_failed" }
           };
         }
       } catch (error) {

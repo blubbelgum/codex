@@ -45,15 +45,85 @@ export function applySearchReplaceDiff(filePath: string, diffContent: string, wo
     let modifiedContent = originalContent;
     
     for (const block of blocks) {
-      const { searchContent, replaceContent } = block;
+      let { searchContent } = block;
+      const { replaceContent } = block;
       
-      // Find the search content in the current state of the file
-      const searchIndex = modifiedContent.indexOf(searchContent);
+      // Try exact match first
+      let searchIndex = modifiedContent.indexOf(searchContent);
+      
+      // If exact match fails, try normalized whitespace matching
+      if (searchIndex === -1) {
+        // Normalize whitespace in both search content and file content for matching
+        const normalizeWhitespace = (text: string) => 
+          text.replace(/\s+/g, ' ').trim();
+        
+        const normalizedSearch = normalizeWhitespace(searchContent);
+        const normalizedContent = normalizeWhitespace(modifiedContent);
+        
+        const normalizedIndex = normalizedContent.indexOf(normalizedSearch);
+        
+        if (normalizedIndex !== -1) {
+          // Find the actual position in the original content by mapping back
+          // This is a simplified approach - count words/tokens to find position
+          const wordsBeforeMatch = normalizedContent.slice(0, normalizedIndex).split(' ').length - 1;
+          
+          // Reconstruct position in original content
+          let actualStart = 0;
+          let wordCount = 0;
+          
+          for (let i = 0; i < modifiedContent.length && wordCount < wordsBeforeMatch; i++) {
+            if (/\S/.test(modifiedContent[i] || '')) {
+              if (i === 0 || /\s/.test(modifiedContent[i - 1] || '')) {
+                wordCount++;
+                if (wordCount === wordsBeforeMatch + 1) {
+                  actualStart = i;
+                  break;
+                }
+              }
+            }
+          }
+          
+          // Find the end position by looking for the search content with flexible whitespace
+          const searchWords = searchContent.split(/\s+/).filter(word => word.length > 0);
+          let actualEnd = actualStart;
+          let currentWordIndex = 0;
+          
+          for (let i = actualStart; i < modifiedContent.length && currentWordIndex < searchWords.length; i++) {
+            if (/\S/.test(modifiedContent[i] || '')) {
+              if (i === actualStart || /\s/.test(modifiedContent[i - 1] || '')) {
+                // Start of a word
+                const wordEnd = modifiedContent.slice(i).search(/\s|$/);
+                const word = modifiedContent.slice(i, wordEnd === -1 ? undefined : i + wordEnd);
+                
+                if (word === searchWords[currentWordIndex]) {
+                  currentWordIndex++;
+                  if (currentWordIndex === searchWords.length) {
+                    actualEnd = wordEnd === -1 ? modifiedContent.length : i + wordEnd;
+                    break;
+                  }
+                  i += Math.max(0, wordEnd - 1);
+                }
+              }
+            }
+          }
+          
+          if (currentWordIndex === searchWords.length) {
+            searchIndex = actualStart;
+            searchContent = modifiedContent.slice(actualStart, actualEnd);
+          }
+        }
+      }
+      
       if (searchIndex === -1) {
         throw new Error(
           `Search content not found in file:\n` +
           `SEARCH:\n${searchContent}\n\n` +
-          `Available content preview:\n${modifiedContent.slice(0, 500)}${modifiedContent.length > 500 ? '...' : ''}`
+          `FILE CONTENT PREVIEW:\n${modifiedContent.slice(0, 800)}${modifiedContent.length > 800 ? '...' : ''}\n\n` +
+          `DEBUGGING HINTS:\n` +
+          `1. Check for exact whitespace and indentation match\n` +
+          `2. Look for special characters that might need escaping\n` +
+          `3. Consider using smaller, more specific search blocks\n` +
+          `4. Use cat command to examine exact file content first`
         );
       }
       
