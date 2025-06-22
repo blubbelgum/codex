@@ -234,6 +234,8 @@ export default function TerminalChat({
     isActive: overlayMode !== "none"
   });
 
+
+
   // Handle keyboard shortcuts for tabs and navigation within overlays
   useInput((input, key) => {
     if (!loading) {
@@ -529,6 +531,8 @@ export default function TerminalChat({
   // ---------------------------------------------------------------------
 
   const { rows: terminalRows } = useTerminalSize();
+
+
 
   useEffect(() => {
     const processInitialInputItems = async () => {
@@ -896,6 +900,8 @@ export default function TerminalChat({
             onExit={() => setOverlayMode("none")}
           />
         )}
+
+
 
         {overlayMode === "files" && (
           <Box flexDirection="column">

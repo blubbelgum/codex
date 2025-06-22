@@ -20,41 +20,9 @@ export default function CommandPreview({
 }: CommandPreviewProps): React.ReactElement {
   const details = parseToolCall(command);
   const commandText = details?.cmdReadableText ?? command.name;
-  const isApplyPatch =
-    command.name === "apply_patch" || details?.cmd?.[0] === "apply_patch";
-  const isShellCommand =
-    command.name === "shell" || details?.cmd?.[0] !== "apply_patch";
+  const isShellCommand = command.name === "shell" || details?.cmd?.[0] !== undefined;
 
   const getCommandDescription = (): string => {
-    if (isApplyPatch) {
-      // Try to extract file operations from patch
-      const args = details?.cmd;
-      if (args && args.length > 1) {
-        const patchContent = args[1];
-        if (typeof patchContent === "string") {
-          const addFileMatch = patchContent.match(/\*\*\* Add File: ([^\n]+)/g);
-          const updateFileMatch = patchContent.match(
-            /\*\*\* Update File: ([^\n]+)/g,
-          );
-
-          if (addFileMatch) {
-            const files = addFileMatch
-              .map((m) => m.replace("*** Add File: ", ""))
-              .join(", ");
-            return `Create ${files}`;
-          }
-
-          if (updateFileMatch) {
-            const files = updateFileMatch
-              .map((m) => m.replace("*** Update File: ", ""))
-              .join(", ");
-            return `Modify ${files}`;
-          }
-        }
-      }
-      return "Apply code changes";
-    }
-
     if (isShellCommand && details?.cmd) {
       const cmd = details.cmd;
       const command = cmd[0];
@@ -98,10 +66,6 @@ export default function CommandPreview({
   };
 
   const getCommandIcon = (): string => {
-    if (isApplyPatch) {
-      return "📝";
-    }
-
     if (isShellCommand && details?.cmd) {
       const command = details.cmd[0];
 
@@ -143,10 +107,6 @@ export default function CommandPreview({
   };
 
   const getRiskLevel = (): "low" | "medium" | "high" => {
-    if (isApplyPatch) {
-      return "medium";
-    }
-
     if (isShellCommand && details?.cmd) {
       const command = details.cmd[0];
       const hasDestructiveFlags = details.cmd.some(

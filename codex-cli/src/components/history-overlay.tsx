@@ -211,20 +211,6 @@ function processCommandArray(
     }
   }
 
-  // Special‑case apply_patch so we can extract the list of modified files
-  if (cmdArray[0] === "apply_patch" || cmdArray.includes("apply_patch")) {
-    const patchTextMaybe = cmdArray.find((s) => s.includes("*** Begin Patch"));
-    if (typeof patchTextMaybe === "string") {
-      const lines = patchTextMaybe.split("\n");
-      for (const line of lines) {
-        const m = line.match(/^[-+]{3} [ab]\/(.+)$/);
-        if (m && m[1]) {
-          filesSet.add(m[1]);
-        }
-      }
-    }
-  }
-
   return cmd;
 }
 

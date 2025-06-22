@@ -52,18 +52,21 @@ const TerminalHeader: React.FC<TerminalHeaderProps> = ({
   showTabInfo = false,
 }) => {
   return (
-    <>
+    <Box justifyContent="center" width="100%">
       {terminalRows < 10 ? (
-        // Compact header for small terminal windows
-        <Text>
-          ● Codex CLI v{version} - {getOSDisplayName()} - {PWD} - {model} (
-          {provider}) -{" "}
-          <Text color={colorsByPolicy[approvalPolicy]}>{approvalPolicy}</Text>
-          {flexModeEnabled ? " - flex-mode" : ""}
-          {showTabInfo ? " | [1] Chat [2] Files [3] Tasks" : ""}
-        </Text>
+        // Compact header for small terminal windows - centered
+        <Box justifyContent="center">
+          <Text>
+            ● Codex CLI v{version} - {getOSDisplayName()} - {PWD} - {model} (
+            {provider}) -{" "}
+            <Text color={colorsByPolicy[approvalPolicy]}>{approvalPolicy}</Text>
+            {flexModeEnabled ? " - flex-mode" : ""}
+            {showTabInfo ? " | [1] Chat [2] Files [3] Tasks" : ""}
+          </Text>
+        </Box>
       ) : (
-        <>
+        // Full header with centered bordered boxes
+        <Box flexDirection="column" alignItems="center">
           <Box borderStyle="round" paddingX={1} width={64}>
             <Text>
               ● <Text bold>Codex CLI</Text>{" "}
@@ -132,9 +135,9 @@ const TerminalHeader: React.FC<TerminalHeaderProps> = ({
               </Text>
             )}
           </Box>
-        </>
+        </Box>
       )}
-    </>
+    </Box>
   );
 };
 

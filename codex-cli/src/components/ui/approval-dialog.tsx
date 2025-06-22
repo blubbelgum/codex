@@ -1,8 +1,7 @@
-import type { ApplyPatchCommand } from "../../approvals.js";
 import type { CommandConfirmation } from "../../utils/agent/agent-loop.js";
+import type { CommandAnalysis } from "../../utils/error-suggestions.js";
 import type { ResponseFunctionToolCall } from "openai/resources/responses/responses.mjs";
 
-import CommandPreview from "./command-preview.js";
 import { ReviewDecision } from "../../utils/agent/review.js";
 import { ErrorSuggestionEngine } from "../../utils/error-suggestions.js";
 import { Box, Text, useInput } from "ink";
@@ -10,191 +9,179 @@ import React, { useState, useEffect } from "react";
 
 export interface ApprovalDialogProps {
   command: Array<string>;
-  applyPatch?: ApplyPatchCommand;
+  mockFunctionCall: ResponseFunctionToolCall;
+  explanation?: string;
+  applyPatch?: boolean;
   onDecision: (confirmation: CommandConfirmation) => void;
   autoApprove?: boolean;
+  message?: string;
+  errorMessage?: string;
+  commandAnalysis?: CommandAnalysis;
+  showSuggestions?: boolean;
 }
 
 export default function ApprovalDialog({
-  command,
-  applyPatch,
+  command: _command,
+  mockFunctionCall,
+  explanation: _explanation,
+  applyPatch: _applyPatch,
   onDecision,
   autoApprove = false,
+  message = "Do you approve this operation?",
+  errorMessage,
+  commandAnalysis,
+  showSuggestions = true,
 }: ApprovalDialogProps): React.ReactElement {
   const [showDetails, setShowDetails] = useState(false);
-  const [explanation, setExplanation] = useState("");
+  const [customMessage, setCustomMessage] = useState("");
+  const [editingMessage, setEditingMessage] = useState(false);
 
-  // Create a mock function call for analysis
-  const mockFunctionCall: ResponseFunctionToolCall = {
-    id: "mock",
-    call_id: "mock",
-    type: "function_call",
-    name: command[0] || "unknown",
-    arguments: JSON.stringify({ cmd: command }),
-  };
+  // Analyze the command for potential issues
+  const analysis = React.useMemo(() => {
+    return ErrorSuggestionEngine.analyzeCommand(mockFunctionCall);
+  }, [mockFunctionCall]);
 
-  const analysis = ErrorSuggestionEngine.analyzeCommand(mockFunctionCall);
-  const hasIssues = analysis.suggestions.length > 0;
   const isHighRisk = analysis.riskLevel === "high";
 
+  // Format suggestions for display
+  const formattedSuggestions = React.useMemo(() => {
+    if (!commandAnalysis || !showSuggestions || commandAnalysis.suggestions.length === 0) {
+      return null;
+    }
+    
+    return ErrorSuggestionEngine.formatSuggestionsForDisplay(commandAnalysis);
+  }, [commandAnalysis, showSuggestions]);
+
+  const hasCommandIssues = commandAnalysis && commandAnalysis.suggestions.length > 0;
+
   useEffect(() => {
-    if (autoApprove && !isHighRisk) {
-      // Auto-approve low and medium risk commands
-      setTimeout(() => {
-        onDecision({
-          review: ReviewDecision.YES,
-          applyPatch,
-          explanation: "Auto-approved (low/medium risk)",
-        });
-      }, 100);
+    if (autoApprove && analysis.riskLevel === "low") {
+      onDecision({ review: ReviewDecision.YES });
     }
-  }, [autoApprove, isHighRisk, onDecision, applyPatch]);
+  }, [autoApprove, analysis.riskLevel, onDecision]);
 
-  useInput((input, key) => {
-    if (key.escape) {
-      onDecision({
-        review: ReviewDecision.NO_CONTINUE,
-        explanation: "Cancelled by user (ESC)",
-      });
-      return;
-    }
+  // Handle keyboard input for approval dialog
+  useInput(
+    (input, key) => {
+      if (editingMessage) {
+        if (key.escape) {
+          setEditingMessage(false);
+          setCustomMessage("");
+        } else if (key.return) {
+          setEditingMessage(false);
+        }
+        return;
+      }
 
-    switch (input.toLowerCase()) {
-      case "y":
+      if (key.escape) {
+        onDecision({ review: ReviewDecision.NO_EXIT });
+      } else if (input.toLowerCase() === "y") {
+        onDecision({ review: ReviewDecision.YES, customDenyMessage: customMessage });
+      } else if (input.toLowerCase() === "n") {
         onDecision({
-          review: ReviewDecision.YES,
-          applyPatch,
-          explanation: explanation || "Approved by user",
+          review: ReviewDecision.NO_EXIT,
+          customDenyMessage: customMessage || "User denied the operation",
         });
-        break;
-      case "n":
-        onDecision({
-          review: ReviewDecision.NO_CONTINUE,
-          explanation: explanation || "Denied by user",
-        });
-        break;
-      case "s":
-        onDecision({
-          review: ReviewDecision.NO_CONTINUE,
-          explanation: explanation || "Skipped by user",
-        });
-        break;
-      case "d":
+      } else if (input.toLowerCase() === "s") {
+        onDecision({ review: ReviewDecision.NO_CONTINUE });
+      } else if (input.toLowerCase() === "d") {
         setShowDetails(!showDetails);
-        break;
-      case "e":
-        // In a real implementation, this would open an input field
-        setExplanation("Custom explanation from user");
-        break;
-      default:
-        // Handle unknown input
-        break;
-    }
-  });
-
-  // Auto-approve display for low-risk commands
-  if (autoApprove && !isHighRisk) {
-    return (
-      <Box flexDirection="column" padding={1}>
-        <Text color="green">🤖 Auto-approving command...</Text>
-        <CommandPreview command={mockFunctionCall} />
-      </Box>
-    );
-  }
+      } else if (input.toLowerCase() === "e") {
+        setEditingMessage(true);
+      }
+    },
+    { isActive: !editingMessage },
+  );
 
   return (
-    <Box flexDirection="column" padding={1}>
+    <Box flexDirection="column" gap={1}>
+      {/* Main message */}
       <Box
-        flexDirection="column"
         borderStyle="round"
-        borderColor={isHighRisk ? "red" : hasIssues ? "yellow" : "green"}
-        padding={1}
+        borderColor={errorMessage ? "red" : isHighRisk ? "red" : hasCommandIssues ? "yellow" : "blue"}
+        paddingX={1}
+        paddingY={1}
       >
-        <Text bold color={isHighRisk ? "red" : hasIssues ? "yellow" : "green"}>
-          {isHighRisk
-            ? "⚠️  HIGH RISK COMMAND"
-            : hasIssues
-              ? "⚠️  COMMAND NEEDS REVIEW"
-              : "✅ COMMAND READY"}
+        <Box flexDirection="column" width="100%">
+          <Text color={errorMessage ? "red" : isHighRisk ? "red" : hasCommandIssues ? "yellow" : "blue"} bold>
+            {errorMessage ? "Operation Failed" : 
+             isHighRisk ? "High Risk Operation" :
+             hasCommandIssues ? "Review Required" : "Approval Required"}
+          </Text>
+          <Text>{message}</Text>
+          
+          {/* Error message display */}
+          {errorMessage && (
+            <Box flexDirection="column" marginTop={1}>
+              <Text color="red" bold>Error Details:</Text>
+              <Text color="red">{errorMessage}</Text>
+            </Box>
+          )}
+        </Box>
+      </Box>
+
+      {/* Command analysis suggestions */}
+      {formattedSuggestions && (
+        <Box
+          borderStyle="round"
+          borderColor="blue"
+          paddingX={1}
+          paddingY={1}
+        >
+          <Box flexDirection="column" width="100%">
+            <Text color="blue" bold>Command Analysis:</Text>
+            <Text>{formattedSuggestions}</Text>
+            <Box marginTop={1}>
+              <Text dimColor>
+                Risk Level: {commandAnalysis?.riskLevel || "unknown"}
+              </Text>
+            </Box>
+          </Box>
+        </Box>
+      )}
+
+      {/* Action buttons */}
+      <Box
+        borderStyle="round"
+        borderColor="gray"
+        paddingX={1}
+        justifyContent="space-between"
+      >
+        <Text>
+          <Text color="green" bold>y</Text> - Approve
         </Text>
-
-        <Box marginTop={1}>
-          <CommandPreview command={mockFunctionCall} />
-        </Box>
-
-        {hasIssues && (
-          <Box marginTop={1} flexDirection="column">
-            <Text bold>🔍 Analysis Results:</Text>
-            <Text>
-              {ErrorSuggestionEngine.formatSuggestionsForDisplay(analysis)}
-            </Text>
-          </Box>
-        )}
-
-        {analysis.estimatedDuration && (
-          <Box marginTop={1}>
-            <Text dimColor>
-              ⏱️ Estimated duration: {analysis.estimatedDuration}
-            </Text>
-          </Box>
-        )}
-
-        {showDetails && (
-          <Box
-            marginTop={1}
-            flexDirection="column"
-            borderStyle="single"
-            borderColor="gray"
-            padding={1}
-          >
-            <Text bold>📋 Command Details:</Text>
-            <Text dimColor>Full command: {command.join(" ")}</Text>
-            <Text dimColor>Risk level: {analysis.riskLevel}</Text>
-            <Text dimColor>Platform: {process.platform}</Text>
-            {analysis.isWindowsSpecific && (
-              <Text dimColor>Windows-specific command detected</Text>
-            )}
-            {applyPatch && (
-              <Box marginTop={1}>
-                <Text dimColor>Apply patch operation:</Text>
-                <Text dimColor>• Patch content available</Text>
-              </Box>
-            )}
-          </Box>
-        )}
-
-        <Box marginTop={1} flexDirection="column">
-          <Text bold>Choose an action:</Text>
-          <Box flexDirection="row" gap={2}>
-            <Text color="green">[y] Approve</Text>
-            <Text color="red">[n] Deny</Text>
-            <Text color="yellow">[s] Skip & Continue</Text>
-          </Box>
-          <Box flexDirection="row" gap={2} marginTop={1}>
-            <Text dimColor>[d] {showDetails ? "Hide" : "Show"} Details</Text>
-            <Text dimColor>[e] Add Explanation</Text>
-            <Text dimColor>[ESC] Cancel</Text>
-          </Box>
-        </Box>
-
-        {explanation && (
-          <Box marginTop={1}>
-            <Text>💬 Note: {explanation}</Text>
-          </Box>
-        )}
-
-        {isHighRisk && (
-          <Box marginTop={1} borderStyle="double" borderColor="red" padding={1}>
-            <Text bold color="red">
-              ⚠️ WARNING: HIGH RISK OPERATION
-            </Text>
-            <Text color="red">
-              This command may make irreversible changes to your system.
-            </Text>
-            <Text color="red">Please review carefully before approving.</Text>
-          </Box>
+        <Text>
+          <Text color="red" bold>n</Text> - Deny
+        </Text>
+        {hasCommandIssues && (
+          <Text>
+            <Text color="blue" bold>d</Text> - Show details
+          </Text>
         )}
       </Box>
+
+      {/* Additional context for errors */}
+      {(errorMessage || hasCommandIssues) && (
+        <Box borderStyle="round" borderColor="gray" paddingX={1}>
+          <Box flexDirection="column" width="100%">
+            <Text color="yellow" bold>Next Steps:</Text>
+            <Text dimColor>
+              • Review the {errorMessage ? "error details" : "analysis"} above
+            </Text>
+            <Text dimColor>
+              • Consider using <Text color="cyan">/help</Text> for more guidance
+            </Text>
+            <Text dimColor>
+              • Use <Text color="cyan">/bug</Text> to report persistent issues
+            </Text>
+            {errorMessage && !hasCommandIssues && (
+              <Text dimColor>
+                • This error doesn't have specific automated suggestions
+              </Text>
+            )}
+          </Box>
+        </Box>
+      )}
     </Box>
   );
 }

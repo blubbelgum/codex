@@ -1,5 +1,5 @@
 import type { ReviewDecision } from "./review.js";
-import type { ApplyPatchCommand, ApprovalPolicy } from "../../approvals.js";
+import type { ApprovalPolicy } from "../../approvals.js";
 import type { AppConfig } from "../config.js";
 import type { ResponseEvent } from "../responses.js";
 import type {
@@ -50,7 +50,6 @@ const PROXY_URL = process.env["HTTPS_PROXY"];
 
 export type CommandConfirmation = {
   review: ReviewDecision;
-  applyPatch?: ApplyPatchCommand | undefined;
   customDenyMessage?: string;
   explanation?: string;
 };
@@ -58,30 +57,20 @@ export type CommandConfirmation = {
 const alreadyProcessedResponses = new Set();
 const alreadyStagedItemIds = new Set<string>();
 
-// File operations instructions for unified diff format
+// Modern file operations instructions
 const fileOperationsInstructions = `
-**CRITICAL: Shell Tool File Operations**
+**CRITICAL: ALWAYS USE FUNCTION CALLS FOR FILE OPERATIONS**
 
-When using the shell tool for file operations, use EXACTLY this format:
+**Core Tools:**
+- read({filePath: "file.js"}) - Read file contents
+- write({filePath: "file.js", content: "code"}) - Create/overwrite files  
+- edit({filePath: "file.js", search: "old", replace: "new"}) - Modify existing files
+- Use shell() only for non-file operations (npm install, git commands, etc.)
 
-### Create Files:
-{"command": ["bash", "-c", "write_to_file filename <<'EOF'\\nfile_content\\nEOF"]}
-
-### Modify Files: 
-{"command": ["bash", "-c", "replace_in_file filename <<'EOF'\\n------- SEARCH\\nexact_content\\n=======\\nnew_content\\n+++++++ REPLACE\\nEOF"]}
-
-### Read Files (for debugging):
-{"command": ["bash", "-c", "read_file filename"]} or {"command": ["cat", "filename"]}
-
-**SEARCH/REPLACE DEBUGGING TIPS:**
-1. Use read_file or cat first to see exact file content
-2. Copy exact whitespace and indentation from the file
-3. Use smaller, unique search blocks if large searches fail
-4. Special characters must match exactly
-
-**CRITICAL**: The bash -c wrapper is required for write_to_file, replace_in_file, and read_file commands.
-
-**FORBIDDEN**: Never use apply_patch, patch, or "*** Begin Patch" format - these are deprecated.
+**Key Points:**
+- Read files before editing to understand current content
+- Use exact whitespace matching for search/replace operations
+- Never use shell commands for file operations
 `;
 
 type AgentLoopParams = {
@@ -107,7 +96,6 @@ type AgentLoopParams = {
   /** Called when the command is not auto-approved to request explicit user review. */
   getCommandConfirmation: (
     command: Array<string>,
-    applyPatch: ApplyPatchCommand | undefined,
   ) => Promise<CommandConfirmation>;
   onLastResponseId: (lastResponseId: string) => void;
 };
@@ -116,7 +104,7 @@ const shellFunctionTool: FunctionTool = {
   type: "function",
   name: "shell",
   description:
-    "Runs a shell command, and returns its output. For file operations, use the unified diff format: write_to_file or replace_in_file wrapped in bash -c with heredoc syntax. For regular commands, use array format.",
+    "Runs shell commands for non-file operations only. Use read(), write(), edit() functions for file operations instead.",
   strict: false,
   parameters: {
     type: "object",
@@ -125,7 +113,7 @@ const shellFunctionTool: FunctionTool = {
         type: "array",
         items: { type: "string" },
         description:
-          "Array of command and arguments. For file operations: ['bash', '-c', 'write_to_file filename <<\\\"EOF\\\"\\ncontents\\nEOF'] or ['bash', '-c', 'replace_in_file filename <<\\\"EOF\\\"\\n------- SEARCH\\nold\\n=======\\nnew\\n+++++++ REPLACE\\nEOF']. For regular commands: ['ls', '-la'] or ['node', 'file.js']. Never use shell prompts like '$', '>', or '#'.",
+          "Array of command and arguments for non-file operations: ['npm', 'install'], ['git', 'status'], ['node', 'script.js']. NEVER use for file operations - use read(), write(), edit() functions instead.",
       },
       workdir: {
         type: "string",
@@ -138,6 +126,341 @@ const shellFunctionTool: FunctionTool = {
       },
     },
     required: ["command"],
+    additionalProperties: false,
+  },
+};
+
+// File reading tool
+const readFunctionTool: FunctionTool = {
+  type: "function",
+  name: "read",
+  description:
+    "Read the contents of a file with optional offset and limit. Returns file content with line numbers. More efficient than shell cat for large files.",
+  strict: false,
+  parameters: {
+    type: "object",
+    properties: {
+      filePath: {
+        type: "string",
+        description: "The path to the file to read",
+      },
+      offset: {
+        type: "number",
+        description: "The line number to start reading from (0-based)",
+      },
+      limit: {
+        type: "number",
+        description: "The number of lines to read (defaults to 2000)",
+      },
+    },
+    required: ["filePath"],
+    additionalProperties: false,
+  },
+};
+
+// File writing tool
+const writeFunctionTool: FunctionTool = {
+  type: "function",
+  name: "write",
+  description:
+    "Write content to a file, creating it if it doesn't exist. Creates parent directories as needed.",
+  strict: false,
+  parameters: {
+    type: "object",
+    properties: {
+      filePath: {
+        type: "string",
+        description: "The path to the file to write",
+      },
+      content: {
+        type: "string",
+        description: "The content to write to the file",
+      },
+    },
+    required: ["filePath", "content"],
+    additionalProperties: false,
+  },
+};
+
+// File editing tool
+const editFunctionTool: FunctionTool = {
+  type: "function",
+  name: "edit",
+  description:
+    "Edit an existing file by applying exact literal search and replace operations. Use for precise modifications to existing files. IMPORTANT: Use exact literal text from the file, never regex patterns or escape sequences.",
+  strict: false,
+  parameters: {
+    type: "object",
+    properties: {
+      filePath: {
+        type: "string",
+        description: "The path to the file to edit",
+      },
+      search: {
+        type: "string",
+        description: "The exact literal text to search for (copy from read() output, no regex patterns like [\\s\\S]* or escape sequences like \\n)",
+      },
+      replace: {
+        type: "string",
+        description: "The exact literal text to replace with",
+      },
+      replaceAll: {
+        type: "boolean",
+        description: "Whether to replace all occurrences (default: false)",
+      },
+    },
+    required: ["filePath", "search", "replace"],
+    additionalProperties: false,
+  },
+};
+
+// Individual edit() calls provide better reliability than batch operations
+
+// Directory listing tool
+const lsFunctionTool: FunctionTool = {
+  type: "function",
+  name: "ls",
+  description:
+    "List directory contents with detailed information. More structured than shell ls command.",
+  strict: false,
+  parameters: {
+    type: "object",
+    properties: {
+      path: {
+        type: "string",
+        description: "Directory path to list (defaults to current directory)",
+      },
+      showHidden: {
+        type: "boolean",
+        description: "Show hidden files (default: false)",
+      },
+      recursive: {
+        type: "boolean",
+        description: "List recursively (default: false)",
+      },
+    },
+    required: [],
+    additionalProperties: false,
+  },
+};
+
+// File pattern matching tool
+const globFunctionTool: FunctionTool = {
+  type: "function",
+  name: "glob",
+  description:
+    "Find files matching glob patterns. Useful for discovering files by pattern across the codebase.",
+  strict: false,
+  parameters: {
+    type: "object",
+    properties: {
+      pattern: {
+        type: "string",
+        description: "Glob pattern to match (e.g., '**/*.ts', 'src/**/*.js')",
+      },
+      cwd: {
+        type: "string",
+        description: "Working directory for glob search",
+      },
+      onlyFiles: {
+        type: "boolean",
+        description: "Return only files, not directories (default: true)",
+      },
+    },
+    required: ["pattern"],
+    additionalProperties: false,
+  },
+};
+
+// Text search tool
+const grepFunctionTool: FunctionTool = {
+  type: "function",
+  name: "grep",
+  description:
+    "Search for text patterns in files using regex. Fast and respects .gitignore by default.",
+  strict: false,
+  parameters: {
+    type: "object",
+    properties: {
+      pattern: {
+        type: "string",
+        description: "Regex pattern to search for",
+      },
+      path: {
+        type: "string",
+        description: "File or directory to search in",
+      },
+      caseSensitive: {
+        type: "boolean",
+        description: "Case sensitive search (default: true)",
+      },
+      includePattern: {
+        type: "string",
+        description: "Include only files matching this glob",
+      },
+      excludePattern: {
+        type: "string",
+        description: "Exclude files matching this glob",
+      },
+    },
+    required: ["pattern"],
+    additionalProperties: false,
+  },
+};
+
+// Web content fetching tool
+const webFetchFunctionTool: FunctionTool = {
+  type: "function",
+  name: "web_fetch",
+  description:
+    "Fetch content from a URL. Useful for accessing documentation, APIs, or web resources.",
+  strict: false,
+  parameters: {
+    type: "object",
+    properties: {
+      url: {
+        type: "string",
+        description: "The URL to fetch",
+      },
+      method: {
+        type: "string",
+        enum: ["GET", "POST", "PUT", "DELETE", "PATCH"],
+        description: "HTTP method (default: GET)",
+      },
+      headers: {
+        type: "object",
+        description: "HTTP headers to send",
+      },
+      body: {
+        type: "string",
+        description: "Request body for POST/PUT/PATCH",
+      },
+    },
+    required: ["url"],
+    additionalProperties: false,
+  },
+};
+
+// Task management tool
+const todoFunctionTool: FunctionTool = {
+  type: "function",
+  name: "todo",
+  description:
+    "Manage a todo list for tracking tasks. Operations: list, add, update, complete, remove.",
+  strict: false,
+  parameters: {
+    type: "object",
+    properties: {
+      operation: {
+        type: "string",
+        enum: ["list", "add", "update", "complete", "remove"],
+        description: "Todo operation to perform",
+      },
+      id: {
+        type: "string",
+        description: "Todo item ID (for update/complete/remove)",
+      },
+      content: {
+        type: "string",
+        description: "Todo content (for add/update)",
+      },
+      priority: {
+        type: "string",
+        enum: ["high", "medium", "low"],
+        description: "Priority level",
+      },
+      status: {
+        type: "string",
+        enum: ["pending", "in_progress", "completed"],
+        description: "Status (for update)",
+      },
+    },
+    required: ["operation"],
+    additionalProperties: false,
+  },
+};
+
+// Sub-agent launching tool
+const taskFunctionTool: FunctionTool = {
+  type: "function",
+  name: "task",
+  description:
+    "Launch a new agent to perform a specific task. Use for complex sub-tasks that need dedicated focus.",
+  strict: false,
+  parameters: {
+    type: "object",
+    properties: {
+      description: {
+        type: "string",
+        description: "A short (3-5 words) description of the task",
+      },
+      prompt: {
+        type: "string",
+        description: "The detailed task for the agent to perform",
+      },
+    },
+    required: ["description", "prompt"],
+    additionalProperties: false,
+  },
+};
+
+// Jupyter notebook tools
+const notebookReadFunctionTool: FunctionTool = {
+  type: "function",
+  name: "notebook_read",
+  description:
+    "Read Jupyter notebook cells. Returns formatted cell content with cell types.",
+  strict: false,
+  parameters: {
+    type: "object",
+    properties: {
+      filePath: {
+        type: "string",
+        description: "Path to the notebook file (.ipynb)",
+      },
+      cellIndex: {
+        type: "number",
+        description: "Specific cell index to read (optional)",
+      },
+    },
+    required: ["filePath"],
+    additionalProperties: false,
+  },
+};
+
+const notebookEditFunctionTool: FunctionTool = {
+  type: "function",
+  name: "notebook_edit",
+  description:
+    "Edit Jupyter notebook cells. Supports adding, updating, and removing cells.",
+  strict: false,
+  parameters: {
+    type: "object",
+    properties: {
+      filePath: {
+        type: "string",
+        description: "Path to the notebook file",
+      },
+      cellIndex: {
+        type: "number",
+        description: "Cell index to edit",
+      },
+      operation: {
+        type: "string",
+        enum: ["add", "update", "remove"],
+        description: "Operation to perform",
+      },
+      cellType: {
+        type: "string",
+        enum: ["code", "markdown", "raw"],
+        description: "Type of cell",
+      },
+      content: {
+        type: "string",
+        description: "Cell content",
+      },
+    },
+    required: ["filePath", "operation"],
     additionalProperties: false,
   },
 };
@@ -182,13 +505,9 @@ const webSearchFunctionTool: FunctionTool = {
   },
 };
 
-
-
 const localShellTool: Tool = {
   type: "local_shell" as const,
 };
-
-
 
 export class AgentLoop {
   private model: string;
@@ -214,7 +533,6 @@ export class AgentLoop {
   private onLoading: (loading: boolean) => void;
   private getCommandConfirmation: (
     command: Array<string>,
-    applyPatch: ApplyPatchCommand | undefined,
   ) => Promise<CommandConfirmation>;
   private onLastResponseId: (lastResponseId: string) => void;
 
@@ -553,9 +871,12 @@ export class AgentLoop {
     if (name === "container.exec" || name === "shell") {
       // Use shell-specific parsing for shell/exec commands
       args = parseToolCallArguments(rawArguments ?? "{}");
-    } else if (name === "web_search" || name === "task_management") {
-      // For web_search and task_management, just use the parsed JSON directly
-      args = parsedArgs;
+    } else if (name === "web_search" || name === "task_management" || 
+               name === "read" || name === "write" || name === "edit" ||
+               name === "ls" || name === "glob" || name === "grep" || name === "web_fetch" || 
+               name === "todo" || name === "task" || name === "notebook_read" || name === "notebook_edit") {
+      // For modern file operation tools, use the parsed JSON directly
+      args = parsedArgs || {};
     } else {
       // For other tools, try shell parsing as fallback
       args = parseToolCallArguments(rawArguments ?? "{}");
@@ -678,6 +999,33 @@ export class AgentLoop {
           output: `Web search failed: ${error instanceof Error ? error.message : 'Unknown error'}`,
           metadata: { exit_code: 1, duration_seconds: duration },
         });
+      }
+    } else if (name === "read" || name === "write" || name === "edit" || 
+               name === "ls" || name === "glob" || name === "grep" || name === "web_fetch" || 
+               name === "todo" || name === "task" || name === "notebook_read" || name === "notebook_edit") {
+      // Handle all file and utility tools via handleExecCommand
+      // Ensure args is never undefined to prevent JSON.stringify issues
+      const safeArgs = args || {};
+      
+      const {
+        outputText,
+        metadata,
+        additionalItems: additionalItemsFromTool,
+      } = await handleExecCommand(
+        {
+          cmd: ["opencode-tool", name, JSON.stringify(safeArgs)],
+          workdir: process.cwd(),
+        },
+        this.config,
+        this.approvalPolicy,
+        this.additionalWritableRoots,
+        this.getCommandConfirmation,
+        this.execAbortController?.signal,
+      );
+      outputItem.output = JSON.stringify({ output: outputText, metadata });
+
+      if (additionalItemsFromTool) {
+        additionalItems.push(...additionalItemsFromTool);
       }
     }
 
@@ -835,12 +1183,68 @@ export class AgentLoop {
       // `disableResponseStorage === true`.
       let transcriptPrefixLen = 0;
 
-      let tools: Array<Tool> = [shellFunctionTool, webSearchFunctionTool];
+      let tools: Array<Tool> = [
+        // FILE OPERATIONS FIRST - These are the primary tools for file work
+        readFunctionTool,
+        writeFunctionTool,
+        editFunctionTool,
+        // DIRECTORY/SEARCH OPERATIONS
+        lsFunctionTool,
+        globFunctionTool,
+        grepFunctionTool,
+        // UTILITY TOOLS
+        webSearchFunctionTool,
+        webFetchFunctionTool,
+        todoFunctionTool,
+        taskFunctionTool,
+        notebookReadFunctionTool,
+        notebookEditFunctionTool,
+        // SHELL TOOL LAST - Only for non-file operations
+        shellFunctionTool
+      ];
+      
       if (this.model.startsWith("codex")) {
-        tools = [localShellTool, webSearchFunctionTool];
+        // For codex models, use a slightly different set
+        tools = [
+          // FILE OPERATIONS FIRST - These are the primary tools for file work
+          readFunctionTool,
+          writeFunctionTool,
+          editFunctionTool,
+          // DIRECTORY/SEARCH OPERATIONS
+          lsFunctionTool,
+          globFunctionTool,
+          grepFunctionTool,
+          // UTILITY TOOLS
+          webSearchFunctionTool,
+          webFetchFunctionTool,
+          todoFunctionTool,
+          taskFunctionTool,
+          notebookReadFunctionTool,
+          notebookEditFunctionTool,
+          // LOCAL SHELL TOOL LAST - Only for non-file operations
+          localShellTool
+        ];
       } else if (this.provider.toLowerCase() === "gemini") {
-        // Use standard tools for Gemini with enhanced search capabilities
-        tools = [shellFunctionTool, webSearchFunctionTool];
+        // Gemini gets the full toolset
+        tools = [
+          // FILE OPERATIONS FIRST - These are the primary tools for file work
+          readFunctionTool,
+          writeFunctionTool,
+          editFunctionTool,
+          // DIRECTORY/SEARCH OPERATIONS
+          lsFunctionTool,
+          globFunctionTool,
+          grepFunctionTool,
+          // UTILITY TOOLS
+          webSearchFunctionTool,
+          webFetchFunctionTool,
+          todoFunctionTool,
+          taskFunctionTool,
+          notebookReadFunctionTool,
+          notebookEditFunctionTool,
+          // SHELL TOOL LAST - Only for non-file operations
+          shellFunctionTool
+        ];
       }
 
       const stripInternalFields = (
@@ -1107,7 +1511,7 @@ export class AgentLoop {
                 content: [
                   {
                     type: "input_text",
-                    text: "⚠️  The current request exceeds the maximum context length supported by the chosen model. Please shorten the conversation, run /clear, or switch to a model with a larger context window and try again.",
+                    text: "WARNING: The current request exceeds the maximum context length supported by the chosen model. Please shorten the conversation, run /clear, or switch to a model with a larger context window and try again.",
                   },
                 ],
               });
@@ -1162,7 +1566,7 @@ export class AgentLoop {
                   content: [
                     {
                       type: "input_text",
-                      text: `⚠️  Rate limit reached. Error details: ${errorDetails}. Please try again later.`,
+                      text: `WARNING: Rate limit reached. Error details: ${errorDetails}. Please try again later.`,
                     },
                   ],
                 });
@@ -1211,7 +1615,7 @@ export class AgentLoop {
                         `Message: ${errCtx.message || "unknown"}`,
                       ].join(", ");
 
-                      return `⚠️  OpenAI rejected the request${
+                      return `WARNING: OpenAI rejected the request${
                         reqId ? ` (request ID: ${reqId})` : ""
                       }. Error details: ${errorDetails}. Please verify your settings and try again.`;
                     })(),
@@ -1468,7 +1872,7 @@ export class AgentLoop {
                 content: [
                   {
                     type: "input_text",
-                    text: "⚠️ Failed to parse streaming response (invalid JSON). Please `/clear` to reset.",
+                    text: "WARNING: Failed to parse streaming response (invalid JSON). Please '/clear' to reset.",
                   },
                 ],
               });
@@ -1480,17 +1884,17 @@ export class AgentLoop {
               err instanceof Error &&
               (err as { code?: string }).code === "insufficient_quota"
             ) {
-              this.onItem({
-                id: `error-${Date.now()}`,
-                type: "message",
-                role: "system",
-                content: [
-                  {
-                    type: "input_text",
-                    text: `\u26a0 Insufficient quota: ${err instanceof Error && err.message ? err.message.trim() : "No remaining quota."} Manage or purchase credits at https://platform.openai.com/account/billing.`,
-                  },
-                ],
-              });
+                              this.onItem({
+                  id: `error-${Date.now()}`,
+                  type: "message",
+                  role: "system",
+                  content: [
+                    {
+                      type: "input_text",
+                      text: `WARNING: Insufficient quota: ${err instanceof Error && err.message ? err.message.trim() : "No remaining quota."} Manage or purchase credits at https://platform.openai.com/account/billing.`,
+                    },
+                  ],
+                });
               this.onLoading(false);
               return;
             }
@@ -1603,7 +2007,7 @@ export class AgentLoop {
             content: [
               {
                 type: "input_text",
-                text: "⚠️  Connection closed prematurely while waiting for the model. Please try again.",
+                text: "WARNING: Connection closed prematurely while waiting for the model. Please try again.",
               },
             ],
           });
@@ -1688,7 +2092,7 @@ export class AgentLoop {
       if (isNetworkOrServerError) {
         try {
           const msgText =
-            "⚠️  Network error while contacting OpenAI. Please check your connection and try again.";
+            "WARNING: Network error while contacting OpenAI. Please check your connection and try again.";
           this.onItem({
             id: `error-${Date.now()}`,
             type: "message",
@@ -1753,7 +2157,7 @@ export class AgentLoop {
             }`,
           ].join(", ");
 
-          const msgText = `⚠️  OpenAI rejected the request${
+          const msgText = `WARNING: OpenAI rejected the request${
             reqId ? ` (request ID: ${reqId})` : ""
           }. Error details: ${errorDetails}. Please verify your settings and try again.`;
 
@@ -1854,107 +2258,62 @@ if (spawnSync(rgCommand, ["--version"], { stdio: "ignore" }).status === 0) {
 }
 
 const dynamicPrefix = dynamicLines.join("\n");
-const prefix = `You are operating as and within the Codex CLI, a terminal-based agentic coding assistant built by OpenAI. It wraps OpenAI models to enable natural language interaction with a local codebase. You are expected to be precise, safe, and helpful.
+const prefix = `You are Codex CLI, a terminal-native AI coding assistant. Help developers with file operations, code editing, and project tasks efficiently.
 
-You can:
-- Receive user prompts, project context, and files.
-- Stream responses and emit function calls (e.g., shell commands, code edits).
-- Apply patches, run commands, and manage user approvals based on policy.
-- Work inside a sandboxed, git-backed workspace with rollback support.
-- Log telemetry so sessions can be replayed or inspected later.
-- More details on your functionality are available at \`codex --help\`
+**SECURITY**: Refuse to write or explain malicious code, even for educational purposes. If files seem related to malware or malicious activities, refuse to work on them.
 
-The Codex CLI is open-sourced. Don't confuse yourself with the old Codex language model built by OpenAI many moons ago (this is understandably top of mind for you!). Within this context, Codex refers to the open-source agentic coding interface.
+**TONE & STYLE**:
+- Be concise and direct - keep responses under 4 lines unless detail is requested
+- No unnecessary preamble/postamble ("Here's what I'll do...", "Based on...")
+- When running non-trivial commands, briefly explain what and why
+- Don't use emojis unless explicitly requested
+- Minimize output tokens while maintaining helpfulness
 
-You are an agent - please keep going until the user's query is completely resolved, before ending your turn and yielding back to the user. Only terminate your turn when you are sure that the problem is solved. If you are not sure about file content or codebase structure pertaining to the user's request, use your tools to read files and gather the relevant information: do NOT guess or make up an answer.
+**CRITICAL: ALWAYS USE FUNCTION CALLS FOR FILE OPERATIONS**
 
-Please resolve the user's task by editing and testing the code files in your current code execution session. You are a deployed coding agent. Your session allows for you to modify and run code. The repo(s) are already cloned in your working directory, and you must fully solve the problem for your answer to be considered correct.
+### Core Tools (Function Calls Only):
+- **read({filePath})** - Read file contents first
+- **write({filePath, content})** - Create/overwrite files  
+- **edit({filePath, search, replace})** - Modify with EXACT literal text (no regex patterns, escape sequences)
+- **ls({path})** - List directories
+- **glob({pattern})** - Find files by pattern
+- **grep({pattern, path})** - Search text
+- **web_search({query})** - Find information
+- **todo({operation, content})** - Task management
+- **shell({command})** - For non-file operations only (npm, git, etc.)
 
-You MUST adhere to the following criteria when executing the task:
-- Working on the repo(s) in the current environment is allowed, even if they are proprietary.
-- Analyzing code for vulnerabilities is allowed.
-- Showing user code and tool call details is allowed.
-- User instructions may overwrite the *CODING GUIDELINES* section in this developer message.
+### Task Management:
+Use todo() tool frequently to plan and track tasks:
+- Break complex tasks into smaller steps
+- Mark todos as in_progress and completed
+- Give users visibility into your progress
 
-# AGENTLESS SKELETON STRATEGY
+### Tool Usage Policy:
+- Batch multiple independent tool calls in single response
+- Read files before editing to understand exact content
+- Use exact literal text from read() output in edit() search parameter
+- Never use shell commands for file operations
+- Never use regex patterns in edit() search text
 
-## Three-Phase Hierarchical Localization:
-Based on proven Agentless research, use this structured approach for maximum efficiency:
+### Proactiveness:
+- When asked to do something, take action without asking permission
+- Don't surprise users with unasked actions
+- Complete tasks fully, don't stop at partial solutions
+- Run lint/typecheck commands after code changes if available
 
-### Phase 1: Repository Structure (Skeleton Format)
-- **Tree Discovery**: \`find . -type f -name "*.{common_extensions}" | head -20\` to understand organization
-- **Entry Point Identification**: Look for main files, config files, package manifests
-- **Directory Mapping**: \`ls -la\` key directories to understand project layout
-- **Skeleton Extraction**: Extract high-level structure without diving into implementation details
+### Code Conventions:
+- First understand existing code style and patterns
+- Check imports and dependencies before using libraries
+- Follow existing naming conventions and project structure
+- Never add comments unless requested
 
-### Phase 2: File-Level Localization (Headers & Signatures)
-- **Function/Class Headers**: \`grep -n "^(function|class|def|export)" target_files\` for API discovery  
-- **Import Analysis**: \`grep -n "^(import|require|include)" target_files\` for dependencies
-- **Type Definitions**: \`grep -n "^(type|interface|struct)" target_files\` for data structures
-- **Compressed Representation**: Focus on declarations, not implementations
-
-### Phase 3: Targeted Implementation Details
-- **Precision Reading**: Only after understanding structure, read specific implementation details
-- **Context-Aware Editing**: Make minimal changes that respect existing architecture
-- **Boundary Respect**: Understand semantic boundaries before modifying code
-
-## File Reading Strategy (Inspired by Agentless):
-
-### Unknown Codebase Exploration:
-1. **Structure First**: \`find . -type f -name "*.*" | head -15\` 
-2. **Skeleton Scan**: \`head -30 important_file && tail -10 important_file\`
-3. **Pattern Search**: \`grep -n "TODO\\|FIXME\\|BUG\\|NOTE" relevant_files\`
-4. **Recent Context**: \`git log --oneline -5 file\` for change history
-
-### Large File Handling (>500 lines):
-1. **Header Analysis**: \`head -50 file\` to understand purpose
-2. **Structure Extraction**: \`grep -n "^[[:space:]]*(function|class|export)" file\`
-3. **Targeted Reading**: Jump to specific sections only after understanding overall structure
-4. **Incremental Loading**: Read around target areas with sufficient context
-
-### Compression-First Approach:
-- Extract essential information using grep patterns
-- Focus on signatures over implementations initially  
-- Build mental model before diving deep
-- Use search to locate specific functionality
-
-# FILE OPERATIONS - CRITICAL REQUIREMENTS
-
-**FORBIDDEN**: Never use apply_patch, patch, or "*** Begin Patch" format - these are deprecated.
-
-**REQUIRED FORMAT**: Always wrap file operations in bash -c with proper heredoc syntax:
-
-### Create Files:
-Use shell tool with: ["bash", "-c", "write_to_file filename <<'EOF'\\nfile_content\\nEOF"]
-
-### Modify Files:
-Use shell tool with: ["bash", "-c", "replace_in_file filename <<'EOF'\\n------- SEARCH\\nexact_content\\n=======\\nnew_content\\n+++++++ REPLACE\\nEOF"]
-
-### Strategic Reading:
-\`\`\`bash
-# Get file overview
-head -50 filename && echo "..." && tail -20 filename
-
-# Find patterns
-grep -n "pattern" filename
-
-# Extract structure
-grep -n "^(class|function|export|def)" filename
-\`\`\`
-
-## Core Principles:
-1. **Skeleton Before Details**: Always understand high-level structure first
-2. **Minimal Context**: Read just enough to solve the problem  
-3. **Pattern Recognition**: Use grep/search to locate targets efficiently
-4. **Incremental Understanding**: Build knowledge layer by layer
-5. **Respect Boundaries**: Understand code organization before modifying
-
-## Efficiency Guidelines:
-- Use compressed file representations when possible
-- Extract function signatures before reading implementations
-- Search for specific patterns rather than reading entire files
-- Understand project structure before making any modifications
-- Validate changes incrementally with appropriate test commands
+## Error Recovery
+- Tool fails? Read error message and adjust parameters
+- File not found? Use \`ls()\` or \`glob()\` to verify paths
+- Search fails? Use \`read()\` to check exact content and copy literal text
+- Edit fails? Avoid regex patterns ([\\s\\S]*) and escape sequences (\\n, \\$)
+- Use smaller, unique search strings from actual file content
+- Never fall back to shell commands for files
 
 ${dynamicPrefix}`;
 

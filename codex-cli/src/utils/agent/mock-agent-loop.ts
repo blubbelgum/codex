@@ -160,9 +160,7 @@ export class MockAgent extends EventEmitter {
         case 'git':
           output = this.mockGitCommand(args);
           break;
-        case 'apply_patch':
-          output = this.mockApplyPatchCommand(args);
-          break;
+
         default:
           output = `Mock execution of: ${command.join(' ')}\nCommand simulated successfully.`;
       }
@@ -324,39 +322,7 @@ export class MockAgent extends EventEmitter {
     }
   }
 
-  private mockApplyPatchCommand(args: Array<string>): string {
-    if (args.length < 2) {
-      throw new Error('apply_patch: missing patch content');
-    }
 
-    const patchContent = args[1];
-    this.log('Applying patch', { patchContent });
-
-    // Parse patch content and simulate file operations
-    const lines = patchContent.split('\n');
-    let currentFile = '';
-    let created = 0;
-    let modified = 0;
-
-    for (const line of lines) {
-      if (line.startsWith('*** Add File: ')) {
-        currentFile = line.replace('*** Add File: ', '').trim();
-        const filePath = this.resolvePath(currentFile);
-        this.createFile(filePath, '');
-        created++;
-      } else if (line.startsWith('*** Update File: ')) {
-        currentFile = line.replace('*** Update File: ', '').trim();
-        modified++;
-      } else if (line.startsWith('+') && currentFile) {
-        const filePath = this.resolvePath(currentFile);
-        const content = line.substring(1);
-        const existing = this.readFile(filePath) || '';
-        this.createFile(filePath, existing + content + '\n');
-      }
-    }
-
-    return `Patch applied successfully.\nFiles created: ${created}\nFiles modified: ${modified}`;
-  }
 
   /**
    * Mock web search function calls

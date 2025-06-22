@@ -1,5 +1,5 @@
 import type { CommandConfirmation } from "./agent-loop.js";
-import type { ApplyPatchCommand, ApprovalPolicy } from "../../approvals.js";
+import type { ApprovalPolicy } from "../../approvals.js";
 import type { ExecInput } from "./sandbox/interface.js";
 import type { ResponseInputItem , ResponseFunctionToolCall } from "openai/resources/responses/responses.mjs";
 
@@ -8,15 +8,21 @@ import { formatCommandForDisplay } from "../../format-command.js";
 import { FullAutoErrorMode } from "../auto-approval-mode.js";
 import { CODEX_UNSAFE_ALLOW_NO_SANDBOX, type AppConfig } from "../config.js";
 import { exec } from "./exec.js";
-import { applySearchReplaceDiff, writeToFile, readFile } from "./handle-unified-diff.js";
+import { 
+  readFile, 
+  writeToFile, 
+  applySearchReplaceDiff
+} from './handle-unified-diff.js';
 import { adaptCommandForPlatform } from "./platform-commands.js";
 import { ReviewDecision } from "./review.js";
 import { isLoggingEnabled, log } from "../logger/log.js";
 import { parseToolCallArguments } from "../parsers.js";
 import { SandboxType } from "./sandbox/interface.js";
 import { PATH_TO_SEATBELT_EXECUTABLE } from "./sandbox/macos-seatbelt.js";
+import fsSync from "fs";
 import fs from "fs/promises";
 import os from "os";
+import path from "path";
 
 // ---------------------------------------------------------------------------
 // Session‑level cache of commands that the user has chosen to always approve.
@@ -47,10 +53,6 @@ function deriveCommandKey(cmd: Array<string>): string {
     coreInvocation,
     /* …ignore the rest… */
   ] = cmd;
-
-  if (coreInvocation?.startsWith("apply_patch")) {
-    return "apply_patch";
-  }
 
   if (maybeShell === "bash" && maybeFlag === "-lc") {
     // If the command was invoked through `bash -lc "<script>"` we extract the
@@ -83,8 +85,7 @@ async function attemptCommandWithRecovery(
   // First attempt: Try the original command
   let result = await execCommand(
     execInput,
-    undefined, // applyPatchCommand
-    false, // runInSandbox
+    false,
     additionalWritableRoots,
     config,
     abortSignal,
@@ -102,7 +103,6 @@ async function attemptCommandWithRecovery(
       const modifiedInput = { ...execInput, cmd: cmdWrapper };
       result = await execCommand(
         modifiedInput,
-        undefined,
         false,
         additionalWritableRoots,
         config,
@@ -124,7 +124,6 @@ async function attemptCommandWithRecovery(
       const modifiedInput = { ...execInput, cmd: adaptedCommand };
       result = await execCommand(
         modifiedInput,
-        undefined,
         false,
         additionalWritableRoots,
         config,
@@ -178,7 +177,6 @@ async function attemptCommandWithRecovery(
       const modifiedInput = { ...execInput, cmd: powershellCommand };
       result = await execCommand(
         modifiedInput,
-        undefined,
         false,
         additionalWritableRoots,
         config,
@@ -236,7 +234,7 @@ function generateWindowsCommandSuggestion(
       `${hasAdaptation ? "2" : "1"}. PowerShell Alternative: Use PowerShell which supports many Unix-like commands`,
       `   powershell.exe -Command "${command.join(" ")}"`,
       ``,
-      `${hasAdaptation ? "3" : "2"}. For file operations: Consider using apply_patch for more reliable file handling`,
+      `${hasAdaptation ? "3" : "2"}. For file operations: Use read(), write(), edit() functions for reliable file handling`,
       ``,
       `Note: The system attempted automatic recovery but all strategies failed.`,
     );
@@ -253,7 +251,681 @@ type HandleExecCommandResult = {
   additionalItems?: Array<ResponseInputItem>;
 };
 
+// ---------------------------------------------------------------------------
+// Handle OpenCode-style tool commands
+// ---------------------------------------------------------------------------
+async function handleOpenCodeTools(
+  cmd: Array<string>,
+  workdir?: string
+): Promise<HandleExecCommandResult | null> {
+  // Check if this is an OpenCode tool command
+  if (cmd.length < 3 || cmd[0] !== "opencode-tool") {
+    return null;
+  }
 
+  const toolName = cmd[1];
+  const argsJson = cmd[2];
+
+  if (!toolName || !argsJson) {
+    return null;
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let args: any;
+  try {
+    args = JSON.parse(argsJson);
+  } catch (error) {
+    return {
+      outputText: JSON.stringify({
+        output: `Error: Invalid tool arguments JSON: ${error}`,
+        metadata: { error: "invalid_json" }
+      }),
+      metadata: { error: "invalid_json" }
+    };
+  }
+
+  switch (toolName) {
+    case "read": {
+      const { filePath, offset = 0, limit = 2000 } = args;
+      if (!filePath) {
+        return {
+          outputText: JSON.stringify({
+            output: "Error: filePath is required for read operation",
+            metadata: { error: "missing_parameter" }
+          }),
+          metadata: { error: "missing_parameter" }
+        };
+      }
+
+      try {
+        const content = readFile(filePath, workdir);
+        const lines = content.split('\n');
+        const selectedLines = lines.slice(offset, offset + limit);
+        const numberedContent = selectedLines.map((line, idx) => 
+          `${(offset + idx + 1).toString().padStart(5, '0')}| ${line}`
+        ).join('\n');
+
+        return {
+          outputText: JSON.stringify({
+            output: numberedContent,
+            metadata: { 
+              operation: "read",
+              file: filePath,
+              lines_read: selectedLines.length,
+              total_lines: lines.length,
+              offset,
+              limit
+            }
+          }),
+          metadata: { operation: "read", file: filePath }
+        };
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        return {
+          outputText: JSON.stringify({
+            output: `Error: ${errorMessage}`,
+            metadata: { error: "read_failed" }
+          }),
+          metadata: { error: "read_failed" }
+        };
+      }
+    }
+
+    case "write": {
+      const { filePath, content } = args;
+      if (!filePath || content === undefined) {
+        return {
+          outputText: JSON.stringify({
+            output: "Error: filePath and content are required for write operation",
+            metadata: { error: "missing_parameter" }
+          }),
+          metadata: { error: "missing_parameter" }
+        };
+      }
+
+      try {
+        const result = writeToFile(filePath, content, workdir);
+        return {
+          outputText: JSON.stringify({
+            output: result,
+            metadata: { operation: "write", file: filePath }
+          }),
+          metadata: { operation: "write", file: filePath }
+        };
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        return {
+          outputText: JSON.stringify({
+            output: `Error: ${errorMessage}`,
+            metadata: { error: "write_failed" }
+          }),
+          metadata: { error: "write_failed" }
+        };
+      }
+    }
+
+    case "edit": {
+      const { filePath, search, replace, replaceAll = false } = args;
+      if (!filePath || !search || replace === undefined) {
+        return {
+          outputText: JSON.stringify({
+            output: "Error: filePath, search, and replace are required for edit operation",
+            metadata: { error: "missing_parameter" }
+          }),
+          metadata: { error: "missing_parameter" }
+        };
+      }
+
+      try {
+        // Convert to the SEARCH/REPLACE format
+        const diffContent = `------- SEARCH\n${search}\n=======\n${replace}\n+++++++ REPLACE`;
+        const result = applySearchReplaceDiff(filePath, diffContent, workdir);
+        return {
+          outputText: JSON.stringify({
+            output: result,
+            metadata: { operation: "edit", file: filePath, replaceAll }
+          }),
+          metadata: { operation: "edit", file: filePath }
+        };
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+                // Provide helpful guidance for common edit failures
+        let guidance = "";
+        if (errorMessage.includes("Search content not found")) {
+          guidance = "\n\nGuidance: The search text was not found. Common fixes:\n" +
+                    "1. Use read() to check exact file content\n" +
+                    "2. Copy literal text (avoid regex patterns like [\\s\\S]*)\n" +
+                    "3. Check whitespace and indentation exactly\n" +
+                    "4. Use smaller, unique search strings";
+        } else if (errorMessage.includes("multiple matches")) {
+          guidance = "\n\nGuidance: Search text appears multiple times. Either provide more context in the search string or use replaceAll: true.";
+        } else if (errorMessage.includes("No such file")) {
+          guidance = "\n\nGuidance: File does not exist. Use write() to create a new file or check the file path with ls().";
+        } else if (errorMessage.includes("regex patterns") || errorMessage.includes("escape sequences")) {
+          guidance = "\n\nGuidance: Don't use regex patterns or escape sequences in search text. Use exact literal text from the file.";
+          }
+        
+        return {
+          outputText: JSON.stringify({
+            output: `Error: ${errorMessage}${guidance}`,
+            metadata: { error: "edit_failed", guidance: guidance }
+          }),
+          metadata: { error: "edit_failed" }
+        };
+      }
+    }
+
+    case "multi_edit": {
+      return {
+        outputText: JSON.stringify({
+          output: "Error: multi_edit is no longer supported. Use individual edit() calls instead.\n\nFor multiple file changes:\n1. Use edit() for each file separately\n2. Each edit is atomic and safer\n3. Better error handling per file",
+          metadata: { error: "multi_edit_deprecated" }
+        }),
+        metadata: { error: "multi_edit_deprecated" }
+      };
+    }
+
+    case "ls": {
+      const { path: dirPath = ".", showHidden = false, recursive = false } = args;
+      
+      try {
+        const { spawnSync } = await import("child_process");
+        
+        // Build the command as a proper shell command string
+        let command = `ls -la`;
+        if (recursive) {
+          command += " -R";
+        }
+        command += ` "${dirPath}"`;
+        
+        if (!showHidden) {
+          command += " | grep -v '^d.*\\s\\.$' | grep -v '^.*\\s\\.\\.$' | grep -v '^[^d].*\\s\\.[^.]*$'";
+        }
+        
+        const result = spawnSync("bash", ["-c", command], {
+          cwd: workdir || process.cwd(),
+          encoding: 'utf8'
+        });
+
+        if (result.error) {
+          throw result.error;
+        }
+
+        return {
+          outputText: JSON.stringify({
+            output: result.stdout || result.stderr || "",
+            metadata: { 
+              operation: "ls",
+              path: dirPath,
+              exit_code: result.status || 0
+            }
+          }),
+          metadata: { operation: "ls", path: dirPath }
+        };
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        return {
+          outputText: JSON.stringify({
+            output: `Error: ${errorMessage}`,
+            metadata: { error: "ls_failed" }
+          }),
+          metadata: { error: "ls_failed" }
+        };
+      }
+    }
+
+    case "glob": {
+      const { pattern, cwd: globCwd, onlyFiles = true } = args;
+      if (!pattern) {
+        return {
+          outputText: JSON.stringify({
+            output: "Error: pattern is required for glob operation",
+            metadata: { error: "missing_parameter" }
+          }),
+          metadata: { error: "missing_parameter" }
+        };
+      }
+
+      try {
+        const { spawnSync } = await import("child_process");
+        
+        // Convert glob pattern to find-compatible pattern
+        // Handle patterns like "**/*.ts" or "src/**/*.{js,ts}"
+        let findCmd: string;
+        
+        if (pattern.includes("**")) {
+          // Handle recursive patterns
+          const basePath = globCwd || '.';
+          let namePattern = pattern;
+          
+          // Extract the file extension pattern
+          if (pattern.includes('.{') && pattern.includes('}')) {
+            // Handle patterns like "**/*.{js,ts}"
+            const match = pattern.match(/\*\*\/\*\.{([^}]+)}/);
+            if (match) {
+              const extensions = match[1].split(',');
+                             const findPatterns = extensions.map((ext: string) => `"*.${ext.trim()}"`).join(' -o -name ');
+              findCmd = `find ${basePath} ${onlyFiles ? '-type f' : ''} \\( -name ${findPatterns} \\)`;
+            } else {
+              // Fallback to basic pattern
+              namePattern = pattern.replace(/\*\*/g, '*');
+              findCmd = `find ${basePath} ${onlyFiles ? '-type f' : ''} -name "${namePattern}"`;
+            }
+          } else {
+            // Handle simple recursive patterns like "**/*.ts"
+            namePattern = pattern.replace(/\*\*\//g, '');
+            findCmd = `find ${basePath} ${onlyFiles ? '-type f' : ''} -name "${namePattern}"`;
+          }
+        } else {
+          // Non-recursive pattern
+          findCmd = `find ${globCwd || '.'} -maxdepth 1 ${onlyFiles ? '-type f' : ''} -name "${pattern}"`;
+        }
+        
+        const result = spawnSync("bash", ["-c", findCmd], {
+          cwd: workdir || process.cwd(),
+          encoding: 'utf8'
+        });
+
+        const files = result.stdout.trim().split('\n').filter(line => line.trim() !== '');
+        
+        return {
+          outputText: JSON.stringify({
+            output: files.join('\n'),
+            metadata: { 
+              operation: "glob",
+              pattern,
+              matches: files.length
+            }
+          }),
+          metadata: { operation: "glob", pattern }
+        };
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        return {
+          outputText: JSON.stringify({
+            output: `Error: ${errorMessage}`,
+            metadata: { error: "glob_failed" }
+          }),
+          metadata: { error: "glob_failed" }
+        };
+      }
+    }
+
+    case "grep": {
+      const { pattern, path: searchPath = ".", caseSensitive = true, includePattern, excludePattern } = args;
+      if (!pattern) {
+        return {
+          outputText: JSON.stringify({
+            output: "Error: pattern is required for grep operation",
+            metadata: { error: "missing_parameter" }
+          }),
+          metadata: { error: "missing_parameter" }
+        };
+      }
+
+      try {
+        const { spawnSync } = await import("child_process");
+        const grepArgs = ["rg", pattern, searchPath];
+        
+        if (!caseSensitive) {
+          grepArgs.push("-i");
+        }
+        if (includePattern) {
+          grepArgs.push("-g", includePattern);
+        }
+        if (excludePattern) {
+          grepArgs.push("-g", `!${excludePattern}`);
+        }
+        
+        const result = spawnSync(grepArgs[0]!, grepArgs.slice(1), {
+          cwd: workdir || process.cwd(),
+          encoding: 'utf8'
+        });
+
+        return {
+          outputText: JSON.stringify({
+            output: result.stdout || (result.status === 1 ? "No matches found" : result.stderr),
+            metadata: { 
+              operation: "grep",
+              pattern,
+              path: searchPath,
+              exit_code: result.status || 0
+            }
+          }),
+          metadata: { operation: "grep", pattern }
+        };
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        return {
+          outputText: JSON.stringify({
+            output: `Error: ${errorMessage}`,
+            metadata: { error: "grep_failed" }
+          }),
+          metadata: { error: "grep_failed" }
+        };
+      }
+    }
+
+    case "web_fetch": {
+      const { url, method = "GET", headers, body } = args;
+      if (!url) {
+        return {
+          outputText: JSON.stringify({
+            output: "Error: url is required for web_fetch operation",
+            metadata: { error: "missing_parameter" }
+          }),
+          metadata: { error: "missing_parameter" }
+        };
+      }
+
+      try {
+        const fetchOptions: RequestInit = {
+          method,
+          headers: headers || {},
+        };
+        
+        if (body && (method === "POST" || method === "PUT" || method === "PATCH")) {
+          fetchOptions.body = body;
+        }
+
+        const response = await fetch(url, fetchOptions);
+        const text = await response.text();
+
+        return {
+          outputText: JSON.stringify({
+            output: text,
+            metadata: { 
+              operation: "web_fetch",
+              url,
+              status: response.status,
+              headers: Object.fromEntries(response.headers.entries())
+            }
+          }),
+          metadata: { operation: "web_fetch", url }
+        };
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        return {
+          outputText: JSON.stringify({
+            output: `Error: ${errorMessage}`,
+            metadata: { error: "web_fetch_failed" }
+          }),
+          metadata: { error: "web_fetch_failed" }
+        };
+      }
+    }
+
+    case "todo": {
+      const { operation, id, content, priority, status } = args;
+      
+      // Enhanced todo system following OpenCode patterns
+      const sessionId = "default"; // Use default session for now
+      const todoFile = path.join(workdir || process.cwd(), '.codex-todos.json');
+      
+      // Todo schema following OpenCode patterns
+      interface TodoItem {
+        id: string;
+        content: string;
+        status: "pending" | "in_progress" | "completed";
+        priority: "high" | "medium" | "low";
+        created: string;
+        updated?: string;
+      }
+      
+      interface TodoStorage {
+        [sessionId: string]: Array<TodoItem>;
+      }
+      
+      let todoStorage: TodoStorage = {};
+      
+      try {
+        // Load existing todos with session support
+        if (fsSync.existsSync(todoFile)) {
+          todoStorage = JSON.parse(fsSync.readFileSync(todoFile, 'utf8'));
+        }
+      } catch {
+        todoStorage = {};
+      }
+
+      // Ensure session exists
+      if (!todoStorage[sessionId]) {
+        todoStorage[sessionId] = [];
+      }
+
+      const todos = todoStorage[sessionId];
+
+      switch (operation) {
+        case "list": {
+          const activeTodos = todos.filter(t => t.status !== "completed");
+          const completedTodos = todos.filter(t => t.status === "completed");
+          
+          let output = "";
+          if (activeTodos.length > 0) {
+            output += "📋 Active Todos:\n";
+            activeTodos.forEach((todo, i) => {
+              const priorityIcon = todo.priority === "high" ? "🔴" : 
+                                 todo.priority === "medium" ? "🟡" : "🟢";
+              const statusIcon = todo.status === "in_progress" ? "🔄" : "⏸️";
+              output += `  ${i + 1}. ${priorityIcon} ${statusIcon} ${todo.content} (${todo.id})\n`;
+            });
+          }
+          
+          if (completedTodos.length > 0) {
+            output += `\n✅ Completed (${completedTodos.length}):\n`;
+            completedTodos.slice(-3).forEach((todo, i) => {
+              output += `  ${i + 1}. ✅ ${todo.content}\n`;
+            });
+          }
+          
+          if (todos.length === 0) {
+            output = "📝 No todos yet. Use todo({operation: 'add', content: 'Your task'}) to create one.";
+          }
+
+          return {
+            outputText: JSON.stringify({
+              output,
+              metadata: { 
+                operation: "todo_list", 
+                total: todos.length,
+                active: activeTodos.length,
+                completed: completedTodos.length,
+                title: `${activeTodos.length} active todos`
+              }
+            }),
+            metadata: { operation: "todo", action: "list", count: todos.length }
+          };
+        }
+
+        case "add": {
+          if (!content) {
+            return {
+              outputText: JSON.stringify({
+                output: "Error: content is required for adding a todo",
+                metadata: { error: "missing_parameter" }
+              }),
+              metadata: { error: "missing_parameter" }
+            };
+          }
+
+          const newTodo: TodoItem = {
+            id: Date.now().toString(),
+            content: content.trim(),
+            priority: (priority as TodoItem["priority"]) || "medium",
+            status: "pending",
+            created: new Date().toISOString()
+          };
+          
+          todos.push(newTodo);
+          todoStorage[sessionId] = todos;
+          await fs.writeFile(todoFile, JSON.stringify(todoStorage, null, 2));
+          
+          const priorityIcon = newTodo.priority === "high" ? "🔴" : 
+                             newTodo.priority === "medium" ? "🟡" : "🟢";
+          
+          return {
+            outputText: JSON.stringify({
+              output: `✅ Added todo: ${priorityIcon} ${newTodo.content}\n   ID: ${newTodo.id}`,
+              metadata: { 
+                operation: "todo_add", 
+                id: newTodo.id,
+                title: "Todo added"
+              }
+            }),
+            metadata: { operation: "todo", action: "add", id: newTodo.id }
+          };
+        }
+
+        case "update":
+        case "complete":
+        case "remove": {
+          if (!id) {
+            return {
+              outputText: JSON.stringify({
+                output: `Error: id is required for ${operation} operation`,
+                metadata: { error: "missing_parameter" }
+              }),
+              metadata: { error: "missing_parameter" }
+            };
+          }
+
+          const todoIndex = todos.findIndex(t => t.id === id);
+          if (todoIndex === -1) {
+            return {
+              outputText: JSON.stringify({
+                output: `❌ Todo with id ${id} not found. Use todo({operation: 'list'}) to see available todos.`,
+                metadata: { error: "todo_not_found" }
+              }),
+              metadata: { error: "todo_not_found" }
+            };
+          }
+
+          const todo = todos[todoIndex];
+          if (!todo) {
+            return {
+              outputText: JSON.stringify({
+                output: `❌ Todo with id ${id} not found.`,
+                metadata: { error: "todo_not_found" }
+              }),
+              metadata: { error: "todo_not_found" }
+            };
+          }
+          
+          let resultMessage = "";
+
+          if (operation === "remove") {
+            todos.splice(todoIndex, 1);
+            resultMessage = `🗑️ Removed todo: "${todo.content}"`;
+          } else if (operation === "complete") {
+            todo.status = "completed";
+            todo.updated = new Date().toISOString();
+            resultMessage = `✅ Completed todo: "${todo.content}"`;
+          } else { // update
+            if (content !== undefined) {
+              todo.content = content.trim();
+            }
+            if (priority !== undefined) {
+              todo.priority = priority as TodoItem["priority"];
+            }
+            if (status !== undefined) {
+              todo.status = status as TodoItem["status"];
+            }
+            todo.updated = new Date().toISOString();
+            
+            const priorityIcon = todo.priority === "high" ? "🔴" : 
+                               todo.priority === "medium" ? "🟡" : "🟢";
+            const statusIcon = todo.status === "in_progress" ? "🔄" : 
+                             todo.status === "completed" ? "✅" : "⏸️";
+            
+            resultMessage = `📝 Updated todo: ${priorityIcon} ${statusIcon} ${todo.content}`;
+          }
+
+          todoStorage[sessionId] = todos;
+          await fs.writeFile(todoFile, JSON.stringify(todoStorage, null, 2));
+          
+          return {
+            outputText: JSON.stringify({
+              output: resultMessage,
+              metadata: { 
+                operation: `todo_${operation}`, 
+                id,
+                title: `Todo ${operation}d`
+              }
+            }),
+            metadata: { operation: "todo", action: operation, id }
+          };
+        }
+
+        default:
+          return {
+            outputText: JSON.stringify({
+              output: `❌ Unknown todo operation: ${operation}\n\nAvailable operations:\n- list: Show all todos\n- add: Create new todo\n- update: Modify existing todo\n- complete: Mark todo as done\n- remove: Delete todo`,
+              metadata: { error: "invalid_operation" }
+            }),
+            metadata: { error: "invalid_operation" }
+          };
+      }
+    }
+
+    case "task": {
+      // Task tool would launch a sub-agent - for now, return a placeholder
+      const { description, prompt } = args;
+      return {
+        outputText: JSON.stringify({
+          output: `Task "${description}" would be launched with prompt: ${prompt}\n\nNote: Sub-agent launching is not yet implemented in Codex CLI.`,
+          metadata: { operation: "task", description }
+        }),
+        metadata: { operation: "task", description }
+      };
+    }
+
+    case "notebook_read":
+    case "notebook_edit": {
+      // Notebook operations would require Jupyter notebook parsing
+      return {
+        outputText: JSON.stringify({
+          output: `Notebook operations (${toolName}) are not yet implemented in Codex CLI.`,
+          metadata: { operation: toolName, status: "not_implemented" }
+        }),
+        metadata: { operation: toolName, status: "not_implemented" }
+      };
+    }
+
+    default:
+      return {
+        outputText: JSON.stringify({
+          output: `Unknown OpenCode tool: ${toolName}`,
+          metadata: { error: "unknown_tool" }
+        }),
+        metadata: { error: "unknown_tool" }
+      };
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Handle OpenCode-style function calls (read, write, edit, etc.)
+// This should be called early in handleExecCommand to catch these commands
+// ---------------------------------------------------------------------------
+async function handleFileOperations(
+  cmd: Array<string>,
+  workdir?: string
+): Promise<HandleExecCommandResult | null> {
+  // Check for OpenCode-style tools first
+  const openCodeResult = await handleOpenCodeTools(cmd, workdir);
+  if (openCodeResult) {
+    return openCodeResult;
+  }
+
+  // Early return if not a bash command
+  if (cmd.length < 3 || cmd[0] !== "bash" || cmd[1] !== "-c") {
+    return null;
+  }
+
+  // Legacy bash commands removed - use edit() function calls instead
+
+  return null;
+}
+
+// Multi-edit functionality removed - use individual edit() calls instead
 
 export async function handleExecCommand(
   args: ExecInput,
@@ -262,191 +934,15 @@ export async function handleExecCommand(
   additionalWritableRoots: ReadonlyArray<string>,
   getCommandConfirmation: (
     command: Array<string>,
-    applyPatch: ApplyPatchCommand | undefined,
   ) => Promise<CommandConfirmation>,
   abortSignal?: AbortSignal,
 ): Promise<HandleExecCommandResult> {
   const { cmd, workdir } = args;
 
-  // Handle new unified diff commands
-  if (cmd[0] === "bash" && (cmd[1] === "-c" || cmd[1] === "-lc") && cmd[2]) {
-    const bashScript = cmd[2];
-    
-    // Check for write_to_file command
-    if (bashScript.includes("write_to_file")) {
-      try {
-        const match = bashScript.match(/write_to_file\s+(\S+)\s+<<'EOF'\n(.*)\nEOF/s);
-        if (match && match[1] && match[2] !== undefined) {
-          const filePath = match[1];
-          const content = match[2];
-          const result = writeToFile(filePath, content, workdir);
-          return {
-            outputText: JSON.stringify({
-              output: result,
-              metadata: { operation: "write_to_file", file: filePath }
-            }),
-            metadata: { operation: "write_to_file", file: filePath }
-          };
-        }
-      } catch (error) {
-        const errorMessage = error instanceof Error ? error.message : String(error);
-        return {
-          outputText: JSON.stringify({
-            output: `Error: ${errorMessage}`,
-            metadata: { error: "write_to_file_failed" }
-          }),
-          metadata: { error: "write_to_file_failed" }
-        };
-      }
-    }
-    
-    // Check for read_file command
-    if (bashScript.includes("read_file")) {
-      try {
-        const match = bashScript.match(/read_file\s+(\S+)/);
-        if (match && match[1]) {
-          const filePath = match[1];
-          const result = readFile(filePath, workdir);
-          return {
-            outputText: JSON.stringify({
-              output: result,
-              metadata: { operation: "read_file", file: filePath, size: result.length }
-            }),
-            metadata: { operation: "read_file", file: filePath, size: result.length }
-          };
-        }
-      } catch (error) {
-        const errorMessage = error instanceof Error ? error.message : String(error);
-        return {
-          outputText: JSON.stringify({
-            output: `Error: ${errorMessage}`,
-            metadata: { error: "read_file_failed" }
-          }),
-          metadata: { error: "read_file_failed" }
-        };
-      }
-    }
-    
-    // Check for replace_in_file command
-    if (bashScript.includes("replace_in_file")) {
-      try {
-        // Improved regex patterns to handle different quote styles and formatting
-        const patterns = [
-          /replace_in_file\s+(\S+)\s+<<'EOF'\s*\n([\s\S]*?)\nEOF\s*$/,
-          /replace_in_file\s+(\S+)\s+<<"EOF"\s*\n([\s\S]*?)\nEOF\s*$/,
-          /replace_in_file\s+(\S+)\s+<<EOF\s*\n([\s\S]*?)\nEOF\s*$/,
-          /replace_in_file\s+(\S+)\s+<<'EOF'\s*([\s\S]*?)EOF\s*$/,
-          /replace_in_file\s+([^\s]+)\s+<<'EOF'\s*([\s\S]*?)EOF\s*$/,
-        ];
-        
-        let match = null;
-        let diffContent = "";
-        let filePath = "";
-        
-        for (let i = 0; i < patterns.length; i++) {
-          const pattern = patterns[i];
-          if (!pattern) {
-            continue;
-          }
-          
-          match = bashScript.match(pattern);
-          if (match && match[1] && match[2] !== undefined) {
-            filePath = match[1];
-            diffContent = match[2];
-            
-            // More careful cleaning - only remove leading/trailing empty lines, not all whitespace
-            diffContent = diffContent.replace(/^\n+/, '').replace(/\n+$/, '');
-            
-            log(`replace_in_file: Matched pattern ${i}, file: ${filePath}, content length: ${diffContent.length}`);
-            break;
-          }
-        }
-        
-        if (match && filePath && diffContent) {
-          log(`replace_in_file: About to apply diff to ${filePath}`);
-          log(`replace_in_file: Diff content preview: ${diffContent.slice(0, 200)}...`);
-          
-          const result = applySearchReplaceDiff(filePath, diffContent, workdir);
-          return {
-            outputText: JSON.stringify({
-              output: result,
-              metadata: { operation: "replace_in_file", file: filePath }
-            }),
-            metadata: { operation: "replace_in_file", file: filePath }
-          };
-        } else {
-          // Enhanced error message with debugging info
-          log(`replace_in_file: Failed to parse command`);
-          log(`replace_in_file: Bash script: ${bashScript}`);
-          
-          return {
-            outputText: JSON.stringify({
-              output: `Error: Could not parse replace_in_file command. 
-
-Debug info:
-- Script length: ${bashScript.length}
-- Contains 'replace_in_file': ${bashScript.includes("replace_in_file")}
-- Contains 'EOF': ${bashScript.includes("EOF")}
-
-Script preview:
-${bashScript.slice(0, 500)}${bashScript.length > 500 ? '...' : ''}
-
-Expected format:
-replace_in_file filename <<'EOF'
-------- SEARCH
-old content
-=======
-new content
-+++++++ REPLACE
-EOF`,
-              metadata: { error: "replace_in_file_parse_failed" }
-            }),
-            metadata: { error: "replace_in_file_parse_failed" }
-          };
-        }
-      } catch (error) {
-        const errorMessage = error instanceof Error ? error.message : String(error);
-        log(`replace_in_file: Exception during processing: ${errorMessage}`);
-        return {
-          outputText: JSON.stringify({
-            output: `Error: ${errorMessage}`,
-            metadata: { error: "replace_in_file_failed" }
-          }),
-          metadata: { error: "replace_in_file_failed" }
-        };
-      }
-    }
-  }
-
-  // Handle deprecated apply_patch command with clear error message
-  if (cmd[0] === "apply_patch") {
-    const errorMessage = `Error: The 'apply_patch' command is no longer supported.
-
-Please use the new SEARCH/REPLACE format instead:
-
-For file modifications:
-replace_in_file path/to/file.ext <<'EOF'
-------- SEARCH
-exact_content_to_find
-=======
-new_content_to_replace_with
-+++++++ REPLACE
-EOF
-
-For creating new files:
-write_to_file path/to/new_file.ext <<'EOF'
-complete_file_content
-EOF
-
-For reading files:
-read_file path/to/file.ext
-
-This new format is more reliable and provides better error handling.`;
-
-    return {
-      outputText: errorMessage,
-      metadata: { error: "command_deprecated" },
-    };
+  // Early check for file operations - this should be first priority
+  const fileOpResult = await handleFileOperations(cmd, workdir);
+  if (fileOpResult) {
+    return fileOpResult;
   }
 
   const key = deriveCommandKey(cmd);
@@ -456,8 +952,7 @@ This new format is more reliable and provides better error handling.`;
   if (alwaysApprovedCommands.has(key)) {
     return execCommand(
       args,
-      /* applyPatch */ undefined,
-      /* runInSandbox */ false,
+      false,
       additionalWritableRoots,
       config,
       abortSignal,
@@ -477,7 +972,6 @@ This new format is more reliable and provides better error handling.`;
     case "ask-user": {
       const review = await askUserPermission(
         args,
-        safety.applyPatch,
         getCommandConfirmation,
       );
       if (review != null) {
@@ -502,10 +996,8 @@ This new format is more reliable and provides better error handling.`;
     }
   }
 
-  const { applyPatch } = safety;
   const summary = await execCommand(
     args,
-    applyPatch,
     runInSandbox,
     additionalWritableRoots,
     config,
@@ -533,7 +1025,6 @@ This new format is more reliable and provides better error handling.`;
   ) {
     const review = await askUserPermission(
       args,
-      safety.applyPatch,
       getCommandConfirmation,
     );
     if (review != null) {
@@ -543,7 +1034,6 @@ This new format is more reliable and provides better error handling.`;
       // sandbox.
       const summary = await execCommand(
         args,
-        applyPatch,
         false,
         additionalWritableRoots,
         config,
@@ -568,29 +1058,6 @@ function convertSummaryToResult(
     outputText = generateWindowsCommandSuggestion(command, outputText);
   }
 
-  // Special handling for patch command permission errors
-  if (exitCode !== 0 && command && command[0] === "patch" && 
-      (stderr.includes("Permission denied") || stderr.includes("Can't create temporary file"))) {
-    outputText = `Error: ${stderr}\n\n` +
-      `The patch command failed due to permission issues in the sandboxed environment.\n\n` +
-      `RECOMMENDED SOLUTION:\n` +
-      `Use the new SEARCH/REPLACE format instead:\n\n` +
-      `replace_in_file filename <<'EOF'\n` +
-      `------- SEARCH\n` +
-      `exact_content_to_find\n` +
-      `=======\n` +
-      `new_content_to_replace_with\n` +
-      `+++++++ REPLACE\n` +
-      `EOF\n\n` +
-      `ALTERNATIVE APPROACHES:\n` +
-      `1. Use write_to_file to overwrite the entire file:\n` +
-      `   write_to_file ${command.length > 1 ? command[1] || '[filename]' : '[filename]'} <<'EOF'\n` +
-      `   [new file content]\n` +
-      `   EOF\n\n` +
-      `2. Use sed for simple replacements:\n` +
-      `   sed -i 's/old_text/new_text/g' ${command.length > 1 ? command[1] || '[filename]' : '[filename]'}\n`;
-  }
-
   const metadata = {
     exit_code: exitCode,
     duration_seconds: Math.round(durationMs / 100) / 10,
@@ -606,8 +1073,6 @@ function convertSummaryToResult(
   };
 }
 
-
-
 type ExecCommandSummary = {
   stdout: string;
   stderr: string;
@@ -617,48 +1082,13 @@ type ExecCommandSummary = {
 
 async function execCommand(
   execInput: ExecInput,
-  applyPatchCommand: ApplyPatchCommand | undefined,
   runInSandbox: boolean,
   additionalWritableRoots: ReadonlyArray<string>,
   config: AppConfig,
   abortSignal?: AbortSignal,
 ): Promise<ExecCommandSummary> {
-  const { cmd } = execInput;
   let { workdir } = execInput;
   let resolvedWorkdir = workdir || process.cwd();
-
-  // Handle deprecated apply_patch command with clear error message
-  if (cmd[0] === "apply_patch") {
-    const errorMessage = `Error: The 'apply_patch' command is no longer supported.
-
-Please use the new SEARCH/REPLACE format instead:
-
-For file modifications:
-replace_in_file path/to/file.ext <<'EOF'
-------- SEARCH
-exact_content_to_find
-=======
-new_content_to_replace_with
-+++++++ REPLACE
-EOF
-
-For creating new files:
-write_to_file path/to/new_file.ext <<'EOF'
-complete_file_content
-EOF
-
-For reading files:
-read_file path/to/file.ext
-
-This new format is more reliable and provides better error handling.`;
-
-    return {
-      stdout: "",
-      stderr: errorMessage,
-      exitCode: 1,
-      durationMs: 0
-    };
-  }
 
   if (workdir) {
     try {
@@ -670,9 +1100,7 @@ This new format is more reliable and provides better error handling.`;
     }
   }
 
-  if (applyPatchCommand != null) {
-    log("EXEC running apply_patch command");
-  } else if (isLoggingEnabled()) {
+  if (isLoggingEnabled()) {
     const { cmd, timeoutInMillis } = execInput;
     // Seconds are a bit easier to read in log messages and most timeouts
     // are specified as multiples of 1000, anyway.
@@ -775,15 +1203,12 @@ async function getSandbox(runInSandbox: boolean): Promise<SandboxType> {
  */
 async function askUserPermission(
   args: ExecInput,
-  applyPatchCommand: ApplyPatchCommand | undefined,
   getCommandConfirmation: (
     command: Array<string>,
-    applyPatch: ApplyPatchCommand | undefined,
   ) => Promise<CommandConfirmation>,
 ): Promise<HandleExecCommandResult | null> {
   const { review: decision, customDenyMessage } = await getCommandConfirmation(
     args.cmd,
-    applyPatchCommand,
   );
 
   if (decision === ReviewDecision.ALWAYS) {
@@ -842,9 +1267,9 @@ export async function handleExecCommandWithRecovery(
     };
   }
 
-  // Enhanced command validation and apply_patch format fixing
+  // Enhanced command validation
   const { cmd: originalCmd, workdir, timeoutInMillis } = command;
-  let cmd = originalCmd;
+  const cmd = originalCmd;
   
   // Check for command repetition to prevent infinite loops
   const repetitionWarning = detectCommandRepetition(cmd);
@@ -857,9 +1282,6 @@ export async function handleExecCommandWithRecovery(
       metadata: { exit_code: 1, duration_seconds: 0, warning: "command_repetition" },
     };
   }
-  
-  // Apply patch format validation and fixing
-  cmd = validateAndFixApplyPatchFormat(cmd);
   
   log(`Executing command with recovery: ${cmd.join(" ")} in ${workdir || process.cwd()}`);
 
@@ -874,20 +1296,6 @@ export async function handleExecCommandWithRecovery(
   try {
     // Use enhanced recovery mechanism
     const summary = await attemptCommandWithRecovery(execInput, cmd, config, abortSignal);
-    
-    // Special handling for apply_patch context failures
-    if (cmd[0] === "apply_patch" && summary.exitCode !== 0 && summary.stderr) {
-      const patchContent = cmd[1] || "";
-      const enhancedError = generateApplyPatchContextError(summary.stderr, patchContent);
-      
-      return {
-        outputText: JSON.stringify({
-          output: enhancedError,
-          metadata: { exit_code: summary.exitCode, duration_seconds: summary.durationMs / 1000 },
-        }),
-        metadata: { exit_code: summary.exitCode, duration_seconds: summary.durationMs / 1000 },
-      };
-    }
     
     return convertSummaryToResult(summary, cmd);
   } catch (error) {
@@ -904,123 +1312,6 @@ export async function handleExecCommandWithRecovery(
       metadata: { exit_code: 1, duration_seconds: 0 },
     };
   }
-}
-
-// ---------------------------------------------------------------------------
-// Enhanced apply_patch format validation and fixing
-// ---------------------------------------------------------------------------
-function validateAndFixApplyPatchFormat(cmd: Array<string>): Array<string> {
-  if (cmd[0] !== "apply_patch" || cmd.length < 2) {
-    return cmd;
-  }
-
-  const patchContent = cmd[1];
-  if (typeof patchContent !== "string") {
-    return cmd;
-  }
-
-  // Check if patch content is properly formatted
-  const issues: Array<string> = [];
-  
-  // Must start with "*** Begin Patch"
-  if (!patchContent.startsWith("*** Begin Patch")) {
-    issues.push("Missing '*** Begin Patch' header");
-  }
-
-  // Must end with "*** End Patch"  
-  if (!patchContent.endsWith("*** End Patch")) {
-    issues.push("Missing '*** End Patch' footer");
-  }
-
-  // Must have either "*** Add File:" or "*** Update File:"
-  if (!patchContent.includes("*** Add File:") && !patchContent.includes("*** Update File:")) {
-    issues.push("Missing file operation specification");
-  }
-
-  // If there are issues, try to auto-fix them
-  if (issues.length > 0) {
-    log(`apply_patch format issues detected: ${issues.join(", ")}`);
-    
-    let fixedContent = patchContent;
-    
-    // Auto-fix missing begin/end markers
-    if (!fixedContent.startsWith("*** Begin Patch")) {
-      fixedContent = "*** Begin Patch\n" + fixedContent;
-    }
-    if (!fixedContent.endsWith("*** End Patch")) {
-      if (!fixedContent.endsWith("\n")) {
-        fixedContent += "\n";
-      }
-      fixedContent += "*** End Patch";
-    }
-    
-    log(`apply_patch auto-fixed format issues`);
-    return ["apply_patch", fixedContent];
-  }
-
-  return cmd;
-}
-
-// ---------------------------------------------------------------------------
-// Enhanced error message generation for apply_patch context failures
-// ---------------------------------------------------------------------------
-function generateApplyPatchContextError(
-  error: string,
-  patchContent: string,
-): string {
-  if (!error.includes("Invalid Context") && !error.includes("Failed to find context")) {
-    return error;
-  }
-
-  // Extract file path from patch if possible
-  let filePath = "unknown";
-  const updateFileMatch = patchContent.match(/\*\*\* Update File:\s*(.+)/);
-  if (updateFileMatch?.[1]) {
-    filePath = updateFileMatch[1].trim();
-  }
-
-  // Extract the problematic context lines for better debugging
-  let problematicContext = "";
-  const contextMatch = error.match(/Invalid Context \d+:\s*([\s\S]*?)(?:\n|$)/);
-  if (contextMatch?.[1]) {
-    problematicContext = contextMatch[1].substring(0, 200); // Limit to first 200 chars
-  }
-
-  const errorHints = [
-    `${error}`,
-    ``,
-    `🔧 APPLY_PATCH CONTEXT MISMATCH DETECTED`,
-    ``,
-    `The patch is trying to modify lines that don't exist in ${filePath}.`,
-    ``,
-    `📋 **IMMEDIATE ACTIONS TO FIX THIS:**`,
-    ``,
-    `1. **Check Current File Content:**`,
-    `   Command: \`type ${filePath}\` or \`cat ${filePath}\``,
-    `   ↳ Look at the actual file content to see what changed`,
-    ``,
-    `2. **Don't Repeat the Same Patch:**`,
-    `   ↳ The same context lines will fail again!`,
-    `   ↳ Find different context lines that actually exist in the file`,
-    ``,
-    `3. **Use Direct File Editing Instead:**`,
-    `   ↳ Sometimes it's easier to rewrite the whole function/section`,
-    `   ↳ Instead of patching, consider creating a new version`,
-    ``,
-    `4. **Find Better Context Lines:**`,
-    `   ↳ Look for unique lines in the file that won't change`,
-    `   ↳ Use lines with distinctive text, not generic code`,
-    ``,
-    `💡 **DEBUGGING TIP:** The file may already have been modified by previous`,
-    `patches or the context you're looking for doesn't exist.`,
-    ``,
-    `⚠️  **STOP REPEATING:** If you've tried this patch 2+ times, the`,
-    `context is definitely wrong. Check the file content first!`,
-    ``,
-    problematicContext ? `📄 **Failed Context Preview:**\n${problematicContext}...` : "",
-  ].filter(line => line !== "");
-
-  return errorHints.join("\n");
 }
 
 // ---------------------------------------------------------------------------
@@ -1061,7 +1352,7 @@ This suggests the command is failing repeatedly. Consider:
 1. **Check the error message carefully** - the same error keeps occurring
 2. **Modify your approach** - try a different command or strategy  
 3. **Verify file/directory exists** - use \`type filename\` or \`dir\` to check
-4. **For apply_patch**: Review the current file content and adjust context lines
+4. **For file operations**: Use read(), write(), edit() functions instead
 
 **Stop retrying the same failing command!** Make changes to your approach first.`;
   }

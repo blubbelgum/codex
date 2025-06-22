@@ -27,7 +27,6 @@ import { fileURLToPath } from "node:url";
 import React, {
   useCallback,
   useState,
-  Fragment,
   useEffect,
   useRef,
 } from "react";
@@ -1041,52 +1040,61 @@ export default function TerminalChatInput({
       )}
       <Box paddingX={2} marginBottom={1}>
         {isNew && !input ? (
-          <Text dimColor>
-            try:{" "}
-            {suggestions.map((m, key) => (
-              <Fragment key={key}>
-                {key !== 0 ? " | " : ""}
-                <Text
-                  backgroundColor={
-                    key + 1 === selectedSuggestion ? "blackBright" : ""
-                  }
-                >
-                  {m}
+          <Box flexDirection="column" gap={1}>
+            <Text>
+              <Text color="cyan" bold>Welcome to Codex CLI!</Text> Here are some ways to get started:
+            </Text>
+            <Box flexDirection="column" paddingLeft={2}>
+              {suggestions.map((m, key) => (
+                <Text key={key}>
+                  <Text
+                    backgroundColor={
+                      key + 1 === selectedSuggestion ? "blackBright" : ""
+                    }
+                    color="green"
+                  >
+                    • {m}
+                  </Text>
                 </Text>
-              </Fragment>
-            ))}
-          </Text>
+              ))}
+            </Box>
+            <Text dimColor>
+              <Text color="yellow">Pro tip:</Text> Use <Text color="cyan">@filename</Text> to reference files, 
+              <Text color="cyan">/help</Text> for commands, and Tab for auto-completion
+            </Text>
+          </Box>
         ) : fsSuggestions.length > 0 ? (
-          <TextCompletions
-            completions={fsSuggestions.map((suggestion) => suggestion.path)}
-            selectedCompletion={selectedCompletion}
-            displayLimit={5}
-          />
+          <Box flexDirection="column">
+            <Text color="blue" dimColor>File suggestions:</Text>
+            <TextCompletions
+              completions={fsSuggestions.map((suggestion) => suggestion.path)}
+              selectedCompletion={selectedCompletion}
+              displayLimit={5}
+            />
+          </Box>
         ) : (
-          <Text dimColor={inputFocused}>
-            {inputFocused ? (
-              <>ctrl+c to exit | "/" to see commands | enter to send | <Text color="yellow">esc to unfocus</Text></>
-            ) : (
-              <><Text color="cyan" bold>Press 2/3 to switch tabs</Text> | <Text color="green">esc to focus input</Text></>
-            )}
-            {contextLeftPercent > 25 && (
-              <>
-                {" — "}
-                <Text color={contextLeftPercent > 40 ? "green" : "yellow"}>
-                  {Math.round(contextLeftPercent)}% context left
+          <Box flexDirection="column">
+            <Text dimColor={inputFocused}>
+              {inputFocused ? (
+                <>ctrl+c to exit | "/" to see commands | enter to send | <Text color="yellow">esc to unfocus</Text></>
+              ) : (
+                <><Text color="cyan" bold>Press 2/3 to switch tabs</Text> | <Text color="green">esc to focus input</Text></>
+              )}
+            </Text>
+            {/* Enhanced context status with more information */}
+            {contextLeftPercent !== undefined && (
+              <Box gap={1}>
+                <Text color={contextLeftPercent > 40 ? "green" : contextLeftPercent > 25 ? "yellow" : "red"}>
+                  Context: {Math.round(contextLeftPercent)}% remaining
                 </Text>
-              </>
+                {contextLeftPercent <= 25 && (
+                  <Text color="red">
+                    — Use <Text color="cyan">/compact</Text> to optimize context
+                  </Text>
+                )}
+              </Box>
             )}
-            {contextLeftPercent <= 25 && (
-              <>
-                {" — "}
-                <Text color="red">
-                  {Math.round(contextLeftPercent)}% context left — send
-                  "/compact" to condense context
-                </Text>
-              </>
-            )}
-          </Text>
+          </Box>
         )}
       </Box>
     </Box>

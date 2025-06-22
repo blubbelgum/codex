@@ -1,5 +1,6 @@
-import { log } from '../logger/log';
+import { log } from '../logger/log.js';
 import * as fs from 'fs';
+import { promises as fsAsync } from 'fs';
 import * as path from 'path';
 
 /**
@@ -16,8 +17,332 @@ import * as path from 'path';
 /**
  * Main function to handle diff commands - simplified interface
  */
-export function handleUnifiedDiffCommand(_command: { operations?: unknown; workdir?: string }): string {
-  throw new Error('Legacy handleUnifiedDiffCommand called - this should not happen');
+export function handleUnifiedDiffCommand(command: { 
+  operations?: Array<{
+    filePath: string;
+    edits: Array<{ old_string: string; new_string: string; replace_all?: boolean }>;
+  }>; 
+  workdir?: string 
+}): string {
+  const { operations, workdir } = command;
+  
+  if (!operations || !Array.isArray(operations) || operations.length === 0) {
+    throw new Error('Multi-edit requires operations array');
+  }
+  
+  const results: Array<string> = [];
+  const appliedOperations: Array<{ filePath: string; originalContent: string }> = [];
+  
+  try {
+    // Apply all operations atomically
+    for (const operation of operations) {
+      const { filePath, edits } = operation;
+      const resolvedPath = workdir ? path.resolve(workdir, filePath) : filePath;
+      
+      // Read original content for rollback if needed
+      if (!fs.existsSync(resolvedPath)) {
+        throw new Error(`File does not exist: ${resolvedPath}`);
+      }
+      
+      const originalContent = fs.readFileSync(resolvedPath, 'utf8');
+      appliedOperations.push({ filePath: resolvedPath, originalContent });
+      
+      // Apply all edits to this file
+      let modifiedContent = originalContent;
+      for (const edit of edits) {
+        const editResult = applySingleEdit(modifiedContent, edit);
+        if (!editResult.success) {
+          throw new Error(`Edit failed for ${filePath}: ${editResult.error}`);
+        }
+        modifiedContent = editResult.content!;
+      }
+      
+      // Write modified content
+      fs.writeFileSync(resolvedPath, modifiedContent, 'utf8');
+      results.push(`Applied ${edits.length} edits to ${filePath}`);
+    }
+    
+    return results.join('\n');
+    
+  } catch (error) {
+    // Rollback all applied operations
+    for (const { filePath, originalContent } of appliedOperations) {
+      try {
+        fs.writeFileSync(filePath, originalContent, 'utf8');
+      } catch (rollbackError) {
+        log(`Failed to rollback ${filePath}: ${rollbackError}`);
+      }
+    }
+    
+    throw error;
+  }
+}
+
+function applySingleEdit(content: string, edit: { old_string: string; new_string: string; replace_all?: boolean }): { success: boolean; content?: string; error?: string } {
+  const { old_string, new_string, replace_all } = edit;
+  
+  // Handle replace_all explicitly
+  if (replace_all) {
+    const newContent = content.replace(new RegExp(escapeRegex(old_string), 'g'), new_string);
+    if (newContent === content) {
+      return { success: false, error: 'No matches found for replace_all operation' };
+    }
+    return { success: true, content: newContent };
+  }
+  
+  // Single replacement with exact match validation
+  const searchIndex = content.indexOf(old_string);
+  if (searchIndex === -1) {
+    return { success: false, error: `Search text not found: "${old_string}"` };
+  }
+  
+  // Check for multiple occurrences
+  const lastIndex = content.lastIndexOf(old_string);
+  if (lastIndex !== searchIndex) {
+    // Smart auto-replacement: if the old_string and new_string are very similar
+    // (like adding headers), automatically use replace_all behavior
+    if (shouldAutoReplaceAll(old_string, new_string)) {
+      log(`Auto-applying replace_all for similar content: "${old_string}" -> "${new_string}"`);
+      const newContent = content.replace(new RegExp(escapeRegex(old_string), 'g'), new_string);
+      return { success: true, content: newContent };
+    }
+    
+    return { success: false, error: 'Multiple occurrences found. Use replace_all: true or provide more specific context' };
+  }
+  
+  const newContent = content.slice(0, searchIndex) + new_string + content.slice(searchIndex + old_string.length);
+  return { success: true, content: newContent };
+}
+
+/**
+ * Determine if we should automatically apply replace_all based on content similarity
+ */
+function shouldAutoReplaceAll(oldString: string, newString: string): boolean {
+  // If the new string contains the old string (like adding headers), auto-replace all
+  if (newString.includes(oldString)) {
+    const addedContent = newString.replace(oldString, '').trim();
+    
+    // Common patterns that should auto-replace:
+    // - Adding HTTP headers (Connection: close)
+    // - Adding import statements
+    // - Adding common prefixes/suffixes
+    const headerPatterns = [
+      /Connection:\s*close/i,
+      /Content-Type:/i,
+      /Cache-Control:/i,
+      /Set-Cookie:/i,
+      /Authorization:/i
+    ];
+    
+    const commonPatterns = [
+      /import\s+/i,
+      /require\s*\(/i,
+      /from\s+['"`]/i,
+      /\r\n/,
+      /\n/
+    ];
+    
+         return headerPatterns.some(pattern => pattern.test(addedContent)) ||
+            commonPatterns.some(pattern => pattern.test(addedContent));
+   }
+   
+   // If strings are very similar (>80% similar), likely safe to replace all
+   const similarity = calculateStringSimilarity(oldString, newString);
+   return similarity > 0.8;
+ }
+ 
+ /**
+  * Calculate string similarity using a simple ratio
+  */
+ function calculateStringSimilarity(str1: string, str2: string): number {
+   const longer = str1.length > str2.length ? str1 : str2;
+   const shorter = str1.length > str2.length ? str2 : str1;
+   
+   if (longer.length === 0) {
+     return 1.0;
+   }
+   
+   const editDistance = levenshteinDistance(longer, shorter);
+   return (longer.length - editDistance) / longer.length;
+ }
+ 
+ /**
+  * Calculate Levenshtein distance between two strings
+  */
+ function levenshteinDistance(str1: string, str2: string): number {
+   const matrix: Array<Array<number>> = Array(str2.length + 1).fill(null).map(() => Array(str1.length + 1).fill(0));
+  
+  for (let i = 0; i <= str1.length; i++) {
+    matrix[0]![i] = i;
+  }
+  for (let j = 0; j <= str2.length; j++) {
+    matrix[j]![0] = j;
+  }
+  
+  for (let j = 1; j <= str2.length; j++) {
+    for (let i = 1; i <= str1.length; i++) {
+      const indicator = str1[i - 1] === str2[j - 1] ? 0 : 1;
+      matrix[j]![i] = Math.min(
+        matrix[j]![i - 1]! + 1,     // deletion
+        matrix[j - 1]![i]! + 1,     // insertion
+        matrix[j - 1]![i - 1]! + indicator // substitution
+      );
+    }
+  }
+  
+  return matrix[str2.length]![str1.length]!;
+}
+
+function escapeRegex(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/**
+ * Advanced fuzzy matching for search content that handles various formatting differences
+ */
+function findFuzzyMatch(content: string, searchContent: string): number {
+  // Strategy 1: Exact match (already tried, but for completeness)
+  let index = content.indexOf(searchContent);
+  if (index !== -1) {
+    return index;
+  }
+  
+  // Strategy 2: Normalize line endings
+  const normalizedContent = content.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+  const normalizedSearch = searchContent.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+  index = normalizedContent.indexOf(normalizedSearch);
+  if (index !== -1) {
+    return index;
+  }
+  
+  // Strategy 3: Clean up shell escaping artifacts
+  const cleanSearch = normalizedSearch
+    .replace(/\\\$/g, '$')      // \$ -> $
+    .replace(/\\"/g, '"')       // \" -> "
+    .replace(/\\\|/g, '|')      // \| -> |
+    .replace(/\\\(/g, '(')      // \( -> (
+    .replace(/\\\)/g, ')')      // \) -> )
+    .replace(/\\\[/g, '[')      // \[ -> [
+    .replace(/\\\]/g, ']');     // \] -> ]
+  
+  index = normalizedContent.indexOf(cleanSearch);
+  if (index !== -1) {
+    return index;
+  }
+  
+  // Strategy 4: Normalize whitespace (flexible matching)
+  const normalizeWS = (text: string) => text.replace(/\s+/g, ' ').trim();
+  const wsNormalizedContent = normalizeWS(normalizedContent);
+  const wsNormalizedSearch = normalizeWS(cleanSearch);
+  
+  const wsIndex = wsNormalizedContent.indexOf(wsNormalizedSearch);
+  if (wsIndex !== -1) {
+    // Map back to original position
+    return mapNormalizedIndexToOriginal(normalizedContent, wsIndex, wsNormalizedSearch.length);
+  }
+  
+  // Strategy 5: Line-by-line fuzzy matching (find key lines)
+  const searchLines = cleanSearch.split('\n').map(line => line.trim()).filter(line => line.length > 0);
+  const contentLines = normalizedContent.split('\n');
+  
+  if (searchLines.length > 0) {
+    // Find the most unique line (longest line with special characters)
+    const keyLine = searchLines.reduce((best, current) => 
+      (current.length > best.length && /[{}()[\]"'$]/.test(current)) ? current : best
+    , searchLines[0] || '');
+    
+    if (keyLine) {
+      const lineIndex = contentLines.findIndex(line => line.trim() === keyLine);
+      if (lineIndex !== -1) {
+        // Try to find the start of the block by matching surrounding context
+        const keyLineIndexInSearch = searchLines.indexOf(keyLine);
+        const startLine = Math.max(0, lineIndex - keyLineIndexInSearch);
+        const startPos = contentLines.slice(0, startLine).join('\n').length + (startLine > 0 ? 1 : 0);
+        return startPos;
+      }
+    }
+  }
+  
+  return -1;
+}
+
+/**
+ * Map a position in whitespace-normalized text back to the original text
+ */
+function mapNormalizedIndexToOriginal(originalText: string, normalizedIndex: number, _searchLength: number): number {
+  let originalPos = 0;
+  let normalizedPos = 0;
+  let inWhitespace = false;
+  
+  for (let i = 0; i < originalText.length && normalizedPos < normalizedIndex; i++) {
+    const char = originalText[i];
+    if (/\s/.test(char || '')) {
+      if (!inWhitespace) {
+        normalizedPos++; // Count first whitespace character
+        inWhitespace = true;
+      }
+      // Skip additional whitespace characters
+    } else {
+      normalizedPos++;
+      inWhitespace = false;
+    }
+    originalPos = i;
+  }
+  
+  return originalPos;
+}
+
+/**
+ * Extract the actual matching content from the file starting at a given position
+ */
+function extractMatchFromPosition(content: string, startPos: number, searchWords: Array<string>): string | null {
+  if (searchWords.length === 0) {
+    return null;
+  }
+  
+  let currentPos = startPos;
+  let wordIndex = 0;
+  const matchedSegments: Array<string> = [];
+  
+  while (currentPos < content.length && wordIndex < searchWords.length) {
+    // Skip whitespace
+    while (currentPos < content.length && /\s/.test(content[currentPos] || '')) {
+      if (matchedSegments.length > 0 || wordIndex > 0) {
+        const char = content[currentPos];
+        if (char) {
+          matchedSegments.push(char);
+        }
+      }
+      currentPos++;
+    }
+    
+    // Find next word
+    const wordStart = currentPos;
+    let wordEnd = currentPos;
+    while (wordEnd < content.length && /\S/.test(content[wordEnd] || '')) {
+      wordEnd++;
+    }
+    
+    const word = content.slice(wordStart, wordEnd);
+    const targetWord = searchWords[wordIndex];
+    
+    if (targetWord && (word === targetWord || word.includes(targetWord) || targetWord.includes(word))) {
+      matchedSegments.push(word);
+      wordIndex++;
+      currentPos = wordEnd;
+    } else {
+      // If we don't find the expected word, include it anyway for context
+      matchedSegments.push(word);
+      currentPos = wordEnd;
+    }
+    
+    // Safety: prevent infinite loops
+    if (matchedSegments.join('').length > searchWords.join(' ').length * 3) {
+      break;
+    }
+  }
+  
+  return wordIndex >= searchWords.length ? matchedSegments.join('') : null;
 }
 
 /**
@@ -67,67 +392,41 @@ export function applySearchReplaceDiff(filePath: string, diffContent: string, wo
         }
       }
       
-      // If still no match, try normalized whitespace matching
+      // If still no match, try fuzzy matching with various normalizations
       if (searchIndex === -1) {
-        // Normalize whitespace in both search content and file content for matching
-        const normalizeWhitespace = (text: string) => 
-          text.replace(/\s+/g, ' ').trim();
-        
-        const normalizedSearch = normalizeWhitespace(searchContent);
-        const normalizedContent = normalizeWhitespace(modifiedContent);
-        
-        const normalizedIndex = normalizedContent.indexOf(normalizedSearch);
-        
-        if (normalizedIndex !== -1) {
-          log(`Found match after whitespace normalization`);
-          // Find the actual position in the original content by mapping back
-          // This is a simplified approach - count characters to find position
-          let actualStart = 0;
-          let actualEnd = 0;
-          let normalizedCharCount = 0;
+        // Check if the search content contains regex patterns that shouldn't be there
+        if (searchContent.includes('[\\s\\S]*') || searchContent.includes('\\$') || searchContent.includes('\\n')) {
+          log(`Warning: Search content contains regex patterns or escape sequences that likely don't match literal text`);
           
-          // Find start position
-          for (let i = 0; i < modifiedContent.length; i++) {
-            const char = modifiedContent[i];
-            if (char && !/\s/.test(char)) {
-              if (normalizedCharCount === normalizedIndex) {
-                actualStart = i;
-                break;
-              }
-              normalizedCharCount++;
-            }
+          // Try to clean up common regex patterns and escape sequences
+          const cleanedSearch = searchContent
+            .replace(/\[\\s\\S\]\*/g, '') // Remove [\s\S]* patterns
+            .replace(/\\\$/g, '$')        // \$ -> $
+            .replace(/\\n/g, '\n')        // \n -> actual newline
+            .replace(/\\t/g, '\t')        // \t -> actual tab
+            .replace(/\\\\/g, '\\')       // \\ -> \
+            .replace(/\\"/g, '"')         // \" -> "
+            .replace(/\\'/g, "'")         // \' -> '
+            .trim();
+          
+          // Try exact match with cleaned search
+          searchIndex = modifiedContent.indexOf(cleanedSearch);
+          if (searchIndex !== -1) {
+            searchContent = cleanedSearch;
+            log(`Found match after cleaning regex patterns: "${searchContent.slice(0, 50)}..."`);
           }
-          
-          // Find end position by looking for the search content with flexible whitespace
-          const searchWords = searchContent.split(/\s+/).filter(word => word.length > 0);
-          let currentWordIndex = 0;
-          
-          for (let i = actualStart; i < modifiedContent.length && currentWordIndex < searchWords.length; i++) {
-            const char = modifiedContent[i];
-            if (char && /\S/.test(char)) {
-              // Find word boundaries
-              let wordEnd = i;
-              while (wordEnd < modifiedContent.length && /\S/.test(modifiedContent[wordEnd] || '')) {
-                wordEnd++;
-              }
-              
-              const word = modifiedContent.slice(i, wordEnd);
-              
-              if (word === searchWords[currentWordIndex]) {
-                currentWordIndex++;
-                if (currentWordIndex === searchWords.length) {
-                  actualEnd = wordEnd;
-                  break;
-                }
-                i = wordEnd - 1; // -1 because loop will increment
-              }
+        }
+        
+        if (searchIndex === -1) {
+          searchIndex = findFuzzyMatch(modifiedContent, searchContent);
+          if (searchIndex !== -1) {
+            // Update searchContent to match what was actually found
+            const searchWords = searchContent.split(/\s+/).filter(w => w.length > 0);
+            const foundMatch = extractMatchFromPosition(modifiedContent, searchIndex, searchWords);
+            if (foundMatch) {
+              searchContent = foundMatch;
+              log(`Found fuzzy match: "${searchContent.slice(0, 50)}..."`);
             }
-          }
-          
-          if (currentWordIndex === searchWords.length) {
-            searchIndex = actualStart;
-            searchContent = modifiedContent.slice(actualStart, actualEnd);
-            log(`Mapped back to original content: "${searchContent.slice(0, 50)}..."`);
           }
         }
       }
@@ -163,11 +462,19 @@ export function applySearchReplaceDiff(filePath: string, diffContent: string, wo
         debugInfo += `${fileLines.length > 20 ? '\n... (truncated)' : ''}\n\n`;
         
         debugInfo += `DEBUGGING HINTS:\n`;
-        debugInfo += `1. Check for exact whitespace and indentation match\n`;
-        debugInfo += `2. Look for special characters that might need escaping\n`;
-        debugInfo += `3. Consider using smaller, more specific search blocks\n`;
-        debugInfo += `4. Use read_file command to examine exact file content first\n`;
-        debugInfo += `5. Try searching for a unique line first, then expand context\n\n`;
+        debugInfo += `1. Use read() to examine the exact file content first\n`;
+        debugInfo += `2. Copy exact literal text from the file (no regex patterns like [\\s\\S]* or escape sequences)\n`;
+        debugInfo += `3. Check for exact whitespace and indentation match\n`;
+        debugInfo += `4. Use smaller, unique search strings that appear only once\n`;
+        debugInfo += `5. Avoid complex multi-line searches - prefer single distinctive lines\n\n`;
+        
+        debugInfo += `COMMON MISTAKES TO AVOID:\n`;
+        debugInfo += `❌ Using regex patterns: [\\s\\S]*, \\d+, etc.\n`;
+        debugInfo += `❌ Using escape sequences: \\n, \\t, \\$, etc.\n`;
+        debugInfo += `❌ Trying to match multiple paragraphs at once\n`;
+        debugInfo += `✅ Use exact literal text from read() output\n`;
+        debugInfo += `✅ Search for unique function names or comments\n`;
+        debugInfo += `✅ Use line-by-line approach for complex changes\n\n`;
         
         // Try to suggest similar content
         if (searchLines.length > 0 && searchLines[0]) {
@@ -342,55 +649,66 @@ The SEARCH block content was not found in the file. This usually means:
 ${preview}
 
 3. **Debugging Steps**:
-   - Use read_file to examine the exact content
+   - Use read() to examine the exact content
    - Copy the exact text including whitespace
    - For large files, search for unique identifiers first
    - Consider using smaller, more specific search blocks
 
 4. **Alternative Approaches**:
-   - Use write_to_file to replace entire file if changes are extensive
-   - Break large changes into multiple smaller search/replace operations
-   - Use execute_command with sed for simple text substitutions
+   - Use write() to replace entire file if changes are extensive
+   - Break large changes into multiple smaller edit() operations
+   - Use shell commands with sed for simple text substitutions
 `;
 }
 
+
+
 /**
- * Parses raw diff command arguments into structured operations
+ * Read file content asynchronously
  */
-export function parseDiffCommand(args: Array<string>): { type: string; filePath: string; content?: string } | null {
-  if (args.length < 2) {
-    return null;
-  }
+export async function readFileAsync(filePath: string, workdir?: string): Promise<string> {
+  const resolvedPath = workdir ? path.resolve(workdir, filePath) : filePath;
   
-  const command = args[0];
-  
-  if (command === 'replace_in_file') {
-    const filePath = args[1];
-    if (!filePath) {
-      return null;
-    }
-    const diffContent = args.slice(2).join(' ');
+  try {
+    // Check if file exists asynchronously
+    await fsAsync.access(resolvedPath);
     
-    return {
-      type: 'replace_in_file',
-      filePath,
-      content: diffContent
-    };
-  }
-  
-  if (command === 'write_to_file') {
-    const filePath = args[1];
-    if (!filePath) {
-      return null;
-    }
-    const content = args.slice(2).join(' ');
+    const content = await fsAsync.readFile(resolvedPath, 'utf8');
+    return content;
     
-    return {
-      type: 'write_to_file',
-      filePath,
-      content
-    };
+  } catch (error: unknown) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    throw new Error(`Failed to read ${filePath}: ${errorMessage}`);
   }
+}
+
+// Removed unused async batch functions - use individual operations instead
+
+/**
+ * Write file content asynchronously
+ */
+export async function writeToFileAsync(filePath: string, content: string, workdir?: string): Promise<string> {
+  const resolvedPath = workdir ? path.resolve(workdir, filePath) : filePath;
+  const dir = path.dirname(resolvedPath);
   
-  return null;
-} 
+  try {
+    // Ensure directory exists
+    if (dir !== '.') {
+      await fsAsync.mkdir(dir, { recursive: true });
+    }
+    
+    // Write the content
+    await fsAsync.writeFile(resolvedPath, content, 'utf8');
+    
+    log(`Successfully wrote content to ${filePath}`);
+    return `Successfully wrote ${content.length} characters to ${filePath}`;
+    
+  } catch (error: unknown) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    throw new Error(`Failed to write to ${filePath}: ${errorMessage}`);
+  }
+}
+
+
+
+ 

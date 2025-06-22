@@ -48,7 +48,33 @@ export function parseToolCall(
   toolCall: ResponseFunctionToolCall,
 ): CommandReviewDetails | undefined {
   const toolCallArgs = parseToolCallArguments(toolCall.arguments);
+  
+  // Handle OpenCode-style tools that don't have cmd/command fields
   if (toolCallArgs == null) {
+    // Check if this is an OpenCode tool by checking the tool name
+    const openCodeTools = new Set([
+      'read', 'write', 'edit', 'ls', 'glob', 'grep', 
+      'web_fetch', 'todo', 'task', 'notebook_read', 'notebook_edit'
+    ]);
+    
+    if (openCodeTools.has(toolCall.name)) {
+      try {
+        const args = JSON.parse(toolCall.arguments);
+        const readableText = formatOpenCodeToolForDisplay(toolCall.name, args);
+        return {
+          cmd: ["opencode-tool", toolCall.name, toolCall.arguments],
+          cmdReadableText: readableText,
+          workdir: undefined,
+        };
+      } catch {
+        return {
+          cmd: ["opencode-tool", toolCall.name],
+          cmdReadableText: `${toolCall.name} (invalid arguments)`,
+          workdir: undefined,
+        };
+      }
+    }
+    
     return undefined;
   }
 
@@ -60,6 +86,39 @@ export function parseToolCall(
     cmdReadableText,
     workdir,
   };
+}
+
+/**
+ * Format an OpenCode tool call for display
+ */
+function formatOpenCodeToolForDisplay(toolName: string, args: Record<string, unknown>): string {
+  switch (toolName) {
+    case 'read':
+      return `read ${args['filePath']}${args['offset'] ? ` (from line ${args['offset']})` : ''}`;
+    case 'write':
+      return `write ${args['filePath']}`;
+    case 'edit':
+      return `edit ${args['filePath']} (${args['replaceAll'] ? 'replace all' : 'replace first'})`;
+
+    case 'ls':
+      return `ls ${args['path'] || '.'}${args['recursive'] ? ' -R' : ''}`;
+    case 'glob':
+      return `glob "${args['pattern']}"`;
+    case 'grep':
+      return `grep "${args['pattern']}" ${args['path'] || '.'}`;
+    case 'web_fetch':
+      return `web_fetch ${args['url']}`;
+    case 'todo':
+      return `todo ${args['operation']}${args['content'] ? ` "${args['content']}"` : ''}`;
+    case 'task':
+      return `task "${args['description']}"`;
+    case 'notebook_read':
+      return `notebook_read ${args['filePath']}`;
+    case 'notebook_edit':
+      return `notebook_edit ${args['filePath']}`;
+    default:
+      return `${toolName} (${Object.keys(args).join(', ')})`;
+  }
 }
 
 /**
@@ -87,27 +146,7 @@ export function parseToolCallArguments(
   // Auto-fix common mistake: using "patch" parameter instead of "cmd"
   if (patch && !cmd && !command) {
     log(
-      `Auto-fixing "patch" parameter to correct "cmd" format. Original arguments: ${toolCallArguments}`,
-    );
-    // Convert {"patch": "content"} to {"cmd": ["apply_patch", "content"]}
-    if (typeof patch === "string") {
-      const fixedJson = { ...json, cmd: ["apply_patch", patch] };
-      const { cmd: fixedCmd } = fixedJson as Record<string, unknown>;
-      const commandArray = toStringArray(fixedCmd);
-      
-      if (commandArray != null && commandArray.length > 0) {
-        // @ts-expect-error timeout and workdir may not exist on json.
-        const { timeout, workdir } = json;
-        return {
-          cmd: commandArray,
-          workdir: typeof workdir === "string" ? workdir : undefined,
-          timeoutInMillis: typeof timeout === "number" ? timeout : undefined,
-        };
-      }
-    }
-    
-    log(
-      `Failed to auto-fix patch parameter format. Arguments: ${toolCallArguments}`,
+      `Legacy patch format no longer supported. Use edit() function instead. Arguments: ${toolCallArguments}`,
     );
     return undefined;
   }

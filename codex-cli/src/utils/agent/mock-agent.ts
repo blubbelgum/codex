@@ -129,7 +129,7 @@ export class MockAgent extends EventEmitter {
     try {
       switch (cmd) {
         case 'ls':
-          output = this.mockLsCommand(args, workdir);
+          output = this.mockLsCommand(args);
           break;
         case 'cat':
           output = this.mockCatCommand(args);
@@ -158,11 +158,8 @@ export class MockAgent extends EventEmitter {
         case 'git':
           output = this.mockGitCommand(args);
           break;
-        case 'apply_patch':
-          output = this.mockApplyPatchCommand(args);
-          break;
         default:
-          output = `Mock execution of: ${command.join(' ')}\nCommand simulated successfully.`;
+          output = `Command not implemented in mock: ${cmd}`;
       }
     } catch (error) {
       output = `Error: ${error instanceof Error ? error.message : 'Unknown error'}`;
@@ -178,8 +175,8 @@ export class MockAgent extends EventEmitter {
     return result;
   }
 
-  private mockLsCommand(args: Array<string>, workdir?: string): string {
-    const targetDir = workdir || this.state.currentDir;
+  private mockLsCommand(_args: Array<string>): string {
+    const targetDir = this.state.currentDir;
     const entries: Array<string> = [];
 
     // List files in directory
@@ -320,44 +317,6 @@ export class MockAgent extends EventEmitter {
       default:
         return `git ${args.join(' ')} - Mock execution completed`;
     }
-  }
-
-  private mockApplyPatchCommand(args: Array<string>): string {
-    if (args.length < 2) {
-      throw new Error('apply_patch: missing patch content');
-    }
-
-    const patchContent = args[1];
-    if (!patchContent) {
-      throw new Error('apply_patch: patch content is empty');
-    }
-
-    this.log('Applying patch', { patchContent });
-
-    // Parse patch content and simulate file operations
-    const lines = patchContent.split('\n');
-    let currentFile = '';
-    let created = 0;
-    let modified = 0;
-
-    for (const line of lines) {
-      if (line.startsWith('*** Add File: ')) {
-        currentFile = line.replace('*** Add File: ', '').trim();
-        const filePath = this.resolvePath(currentFile);
-        this.createFile(filePath, '');
-        created++;
-      } else if (line.startsWith('*** Update File: ')) {
-        currentFile = line.replace('*** Update File: ', '').trim();
-        modified++;
-      } else if (line.startsWith('+') && currentFile) {
-        const filePath = this.resolvePath(currentFile);
-        const content = line.substring(1);
-        const existing = this.readFile(filePath) || '';
-        this.createFile(filePath, existing + content + '\n');
-      }
-    }
-
-    return `Patch applied successfully.\nFiles created: ${created}\nFiles modified: ${modified}`;
   }
 
   private resolvePath(path: string): string {
