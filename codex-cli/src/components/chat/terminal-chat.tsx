@@ -31,13 +31,11 @@ import { shortCwd } from "../../utils/short-path.js";
 import { saveRollout } from "../../utils/storage/save-rollout.js";
 import { CLI_VERSION } from "../../version.js";
 import ApprovalModeOverlay from "../approval-mode-overlay.js";
-import BackgroundProcessesOverlay from "../background-processes-overlay.js";
 import DiffOverlay from "../diff-overlay.js";
 import HelpOverlay from "../help-overlay.js";
 import HistoryOverlay from "../history-overlay.js";
 import ModelOverlay from "../model-overlay.js";
 import SessionsOverlay from "../sessions-overlay.js";
-import TodoManagementOverlay, { type TodoItem } from "../todo-management-overlay.js";
 import { FileNavigator } from "../ui/file-navigator.js";
 import { FilePreview } from "../ui/file-preview.js";
 import chalk from "chalk";
@@ -56,9 +54,7 @@ export type OverlayModeType =
   | "help"
   | "diff"
   | "files"
-  | "file-search"
-  | "background-processes"
-  | "todo-management";
+  | "file-search";
 
 type Props = {
   config: AppConfig;
@@ -222,8 +218,7 @@ export default function TerminalChat({
   const [initialPrompt, setInitialPrompt] = useState(_initialPrompt);
   const [initialImagePaths, setInitialImagePaths] =
     useState(_initialImagePaths);
-  const [backgroundProcesses, setBackgroundProcesses] = useState<Array<{ pid: string; command: string; startTime?: Date }>>([]);
-  const [currentTodos, setCurrentTodos] = useState<Array<TodoItem>>([]);
+  const [backgroundProcesses, setBackgroundProcesses] = useState<Array<{ pid: string; command: string }>>([]);
 
   const PWD = React.useMemo(() => shortCwd(), []);
 
@@ -233,12 +228,6 @@ export default function TerminalChat({
         setOverlayMode("none"); // Return to chat
         setFilesPaneFocus('navigator'); // Reset focus
         setFullPreviewMode(false); // Reset full preview mode
-    } else if (!loading && input === '4') {
-        // Open background processes overlay
-        setOverlayMode("background-processes");
-    } else if (!loading && input === '5') {
-        // Open todo management overlay
-        setOverlayMode("todo-management");
     }
   }, { 
     // Only active when not in normal chat mode to avoid interfering with typing
@@ -601,7 +590,7 @@ export default function TerminalChat({
                     const existing = prev.find((p) => p.pid === pid);
                     if (!existing) {
                       log(`Background process detected: PID ${pid}, Command: ${command}`);
-                      return [...prev, { pid, command, startTime: new Date() }];
+                      return [...prev, { pid, command }];
                     }
                     return prev;
                   });
@@ -620,7 +609,7 @@ export default function TerminalChat({
                   const existing = prev.find((p) => p.pid === pid);
                   if (!existing) {
                     log(`Background process detected (direct): PID ${pid}, Command: ${command}`);
-                    return [...prev, { pid, command, startTime: new Date() }];
+                    return [...prev, { pid, command }];
                   }
                   return prev;
                 });
@@ -634,7 +623,7 @@ export default function TerminalChat({
     // TEST: Force add background process after we see enough messages 
     if (items.length > 8 && backgroundProcesses.length === 0) {
       log(`[DEBUG] Force adding test background process - no detection working`);
-      setBackgroundProcesses([{ pid: "TEST-66438", command: "pnpm start", startTime: new Date() }]);
+      setBackgroundProcesses([{ pid: "TEST-66438", command: "pnpm start" }]);
     }
   }, [items, backgroundProcesses.length]);
 
@@ -664,40 +653,6 @@ export default function TerminalChat({
     // run once on mount
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-
-  // Monitor todo operations in command responses
-  useEffect(() => {
-    // Look for todo operations in recent responses to sync current state
-    items.forEach((item) => {
-      if (item.type === "function_call_output") {
-        try {
-          const parsed = JSON.parse(item.output);
-          if (parsed.metadata?.todos && Array.isArray(parsed.metadata.todos)) {
-            setCurrentTodos(parsed.metadata.todos);
-          }
-        } catch {
-          // Not JSON or no todos, ignore
-        }
-      }
-    });
-  }, [items]);
-
-  // Update todos function for the overlay
-  const updateTodos = async (todos: Array<TodoItem>) => {
-    setCurrentTodos(todos);
-    // Also trigger a todowrite command to persist the changes
-    if (agent) {
-      const inputItem = {
-        type: "message" as const,
-        role: "user" as const,
-        content: [{ 
-          type: "input_text" as const, 
-          text: `todowrite({todos: ${JSON.stringify(todos)}})` 
-        }],
-      };
-      agent.run([inputItem]);
-    }
-  };
 
   // Just render every item in order, no grouping/collapse.
   const lastMessageBatch = items.map((item) => ({ item }));
@@ -1024,6 +979,8 @@ export default function TerminalChat({
           />
         )}
 
+
+
         {overlayMode === "files" && (
           <Box flexDirection="column">
             <Box borderStyle="single" paddingX={2} height={4}>
@@ -1088,22 +1045,11 @@ export default function TerminalChat({
           </Box>
         )}
 
-        {overlayMode === "background-processes" && (
-          <BackgroundProcessesOverlay
-            processes={backgroundProcesses}
-            onExit={() => setOverlayMode("none")}
-            onProcessKilled={(pid) => {
-              setBackgroundProcesses(prev => prev.filter(p => p.pid !== pid));
-            }}
-          />
-        )}
-        {overlayMode === "todo-management" && (
-          <TodoManagementOverlay
-            todos={currentTodos}
-            onExit={() => setOverlayMode("none")}
-            onTodosUpdated={updateTodos}
-          />
-        )}
+
+
+
+
+
       </Box>
     </Box>
   );
