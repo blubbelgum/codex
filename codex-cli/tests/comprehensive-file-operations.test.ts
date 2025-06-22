@@ -90,7 +90,7 @@ class TestClass {
 
     const createMockPolicy = () => ({ mode: 'auto' } as any);
 
-    it('should reject multi_edit with helpful error message', async () => {
+    it('should handle multi_edit operations efficiently', async () => {
       const command = ['opencode-tool', 'multi_edit', JSON.stringify({
         operations: [
           {
@@ -110,10 +110,14 @@ class TestClass {
         async () => ({ review: 'yes' }) as any
       );
 
-      expect(result.metadata['error']).toBe('multi_edit_deprecated');
+      expect(result.metadata['operation']).toBe('multi_edit');
+      if (!result.metadata['error']) {
+        const updatedContent = fs.readFileSync(path.join(tempDir, 'test.js'), 'utf8');
+        expect(updatedContent).toContain('Hello World');
+      }
+      
       const parsed = JSON.parse(result.outputText);
-      expect(parsed.output).toContain('multi_edit is no longer supported');
-      expect(parsed.output).toContain('Use individual edit() calls instead');
+      expect(parsed.metadata.atomic).toBe(true);
     });
 
     it('should handle individual edit operations', async () => {

@@ -11,7 +11,8 @@ import { exec } from "./exec.js";
 import { 
   readFile, 
   writeToFile, 
-  applySearchReplaceDiff
+  applySearchReplaceDiff,
+  handleUnifiedDiffCommand
 } from './handle-unified-diff.js';
 import { adaptCommandForPlatform } from "./platform-commands.js";
 import { ReviewDecision } from "./review.js";
@@ -416,13 +417,51 @@ async function handleOpenCodeTools(
     }
 
     case "multi_edit": {
-      return {
-        outputText: JSON.stringify({
-          output: "Error: multi_edit is no longer supported. Use individual edit() calls instead.\n\nFor multiple file changes:\n1. Use edit() for each file separately\n2. Each edit is atomic and safer\n3. Better error handling per file",
-          metadata: { error: "multi_edit_deprecated" }
-        }),
-        metadata: { error: "multi_edit_deprecated" }
-      };
+      const { operations } = args;
+      
+      if (!operations || !Array.isArray(operations)) {
+        return {
+          outputText: JSON.stringify({
+            output: "Error: multi_edit requires 'operations' array\n\nFormat: multi_edit({operations: [{filePath: 'file.js', edits: [{old_string: 'search', new_string: 'replace'}]}]})",
+            metadata: { error: "missing_operations" }
+          }),
+          metadata: { error: "missing_operations" }
+        };
+      }
+
+      try {
+        const result = handleUnifiedDiffCommand({ operations, workdir });
+        
+        // Count total edits applied
+        const totalEdits = operations.reduce((sum: number, op: { edits?: Array<unknown> }) => sum + (op.edits?.length || 0), 0);
+        const filesModified = operations.length;
+        
+        return {
+          outputText: JSON.stringify({
+            output: result,
+            metadata: { 
+              operation: "multi_edit",
+              files_modified: filesModified,
+              total_edits: totalEdits,
+              atomic: true
+            }
+          }),
+          metadata: { 
+            operation: "multi_edit", 
+            files_modified: filesModified,
+            total_edits: totalEdits 
+          }
+        };
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        return {
+          outputText: JSON.stringify({
+            output: `Error: ${errorMessage}\n\nGuidance:\n- Use exact literal text from read() output\n- Ensure all files exist before editing\n- For multiple matches, use replace_all: true\n- Check file permissions`,
+            metadata: { error: "multi_edit_failed" }
+          }),
+          metadata: { error: "multi_edit_failed" }
+        };
+      }
     }
 
     case "ls": {
@@ -655,10 +694,8 @@ async function handleOpenCodeTools(
       }
     }
 
-    case "todo": {
-      const { operation, id, content, priority, status } = args;
-      
-      // Enhanced todo system following OpenCode patterns
+    case "todoread": {
+      // Read current todo list - takes no parameters
       const sessionId = "default"; // Use default session for now
       const todoFile = path.join(workdir || process.cwd(), '.codex-todos.json');
       
@@ -668,8 +705,6 @@ async function handleOpenCodeTools(
         content: string;
         status: "pending" | "in_progress" | "completed";
         priority: "high" | "medium" | "low";
-        created: string;
-        updated?: string;
       }
       
       interface TodoStorage {
@@ -693,177 +728,96 @@ async function handleOpenCodeTools(
       }
 
       const todos = todoStorage[sessionId];
+      const activeTodos = todos.filter(t => t.status !== "completed");
 
-      switch (operation) {
-        case "list": {
-          const activeTodos = todos.filter(t => t.status !== "completed");
-          const completedTodos = todos.filter(t => t.status === "completed");
-          
-          let output = "";
-          if (activeTodos.length > 0) {
-            output += "📋 Active Todos:\n";
-            activeTodos.forEach((todo, i) => {
-              const priorityIcon = todo.priority === "high" ? "🔴" : 
-                                 todo.priority === "medium" ? "🟡" : "🟢";
-              const statusIcon = todo.status === "in_progress" ? "🔄" : "⏸️";
-              output += `  ${i + 1}. ${priorityIcon} ${statusIcon} ${todo.content} (${todo.id})\n`;
-            });
+      return {
+        outputText: JSON.stringify({
+          output: JSON.stringify(todos, null, 2),
+          metadata: { 
+            todos,
+            title: `${activeTodos.length} todos`,
+            operation: "todoread"
           }
-          
-          if (completedTodos.length > 0) {
-            output += `\n✅ Completed (${completedTodos.length}):\n`;
-            completedTodos.slice(-3).forEach((todo, i) => {
-              output += `  ${i + 1}. ✅ ${todo.content}\n`;
-            });
-          }
-          
-          if (todos.length === 0) {
-            output = "📝 No todos yet. Use todo({operation: 'add', content: 'Your task'}) to create one.";
-          }
-
-          return {
-            outputText: JSON.stringify({
-              output,
-              metadata: { 
-                operation: "todo_list", 
-                total: todos.length,
-                active: activeTodos.length,
-                completed: completedTodos.length,
-                title: `${activeTodos.length} active todos`
-              }
-            }),
-            metadata: { operation: "todo", action: "list", count: todos.length }
-          };
+        }),
+        metadata: { 
+          todos,
+          title: `${activeTodos.length} todos`,
+          operation: "todoread"
         }
+      };
+    }
 
-        case "add": {
-          if (!content) {
-            return {
-              outputText: JSON.stringify({
-                output: "Error: content is required for adding a todo",
-                metadata: { error: "missing_parameter" }
-              }),
-              metadata: { error: "missing_parameter" }
-            };
-          }
-
-          const newTodo: TodoItem = {
-            id: Date.now().toString(),
-            content: content.trim(),
-            priority: (priority as TodoItem["priority"]) || "medium",
-            status: "pending",
-            created: new Date().toISOString()
-          };
-          
-          todos.push(newTodo);
-          todoStorage[sessionId] = todos;
-          await fs.writeFile(todoFile, JSON.stringify(todoStorage, null, 2));
-          
-          const priorityIcon = newTodo.priority === "high" ? "🔴" : 
-                             newTodo.priority === "medium" ? "🟡" : "🟢";
-          
-          return {
-            outputText: JSON.stringify({
-              output: `✅ Added todo: ${priorityIcon} ${newTodo.content}\n   ID: ${newTodo.id}`,
-              metadata: { 
-                operation: "todo_add", 
-                id: newTodo.id,
-                title: "Todo added"
-              }
-            }),
-            metadata: { operation: "todo", action: "add", id: newTodo.id }
-          };
-        }
-
-        case "update":
-        case "complete":
-        case "remove": {
-          if (!id) {
-            return {
-              outputText: JSON.stringify({
-                output: `Error: id is required for ${operation} operation`,
-                metadata: { error: "missing_parameter" }
-              }),
-              metadata: { error: "missing_parameter" }
-            };
-          }
-
-          const todoIndex = todos.findIndex(t => t.id === id);
-          if (todoIndex === -1) {
-            return {
-              outputText: JSON.stringify({
-                output: `❌ Todo with id ${id} not found. Use todo({operation: 'list'}) to see available todos.`,
-                metadata: { error: "todo_not_found" }
-              }),
-              metadata: { error: "todo_not_found" }
-            };
-          }
-
-          const todo = todos[todoIndex];
-          if (!todo) {
-            return {
-              outputText: JSON.stringify({
-                output: `❌ Todo with id ${id} not found.`,
-                metadata: { error: "todo_not_found" }
-              }),
-              metadata: { error: "todo_not_found" }
-            };
-          }
-          
-          let resultMessage = "";
-
-          if (operation === "remove") {
-            todos.splice(todoIndex, 1);
-            resultMessage = `🗑️ Removed todo: "${todo.content}"`;
-          } else if (operation === "complete") {
-            todo.status = "completed";
-            todo.updated = new Date().toISOString();
-            resultMessage = `✅ Completed todo: "${todo.content}"`;
-          } else { // update
-            if (content !== undefined) {
-              todo.content = content.trim();
-            }
-            if (priority !== undefined) {
-              todo.priority = priority as TodoItem["priority"];
-            }
-            if (status !== undefined) {
-              todo.status = status as TodoItem["status"];
-            }
-            todo.updated = new Date().toISOString();
-            
-            const priorityIcon = todo.priority === "high" ? "🔴" : 
-                               todo.priority === "medium" ? "🟡" : "🟢";
-            const statusIcon = todo.status === "in_progress" ? "🔄" : 
-                             todo.status === "completed" ? "✅" : "⏸️";
-            
-            resultMessage = `📝 Updated todo: ${priorityIcon} ${statusIcon} ${todo.content}`;
-          }
-
-          todoStorage[sessionId] = todos;
-          await fs.writeFile(todoFile, JSON.stringify(todoStorage, null, 2));
-          
-          return {
-            outputText: JSON.stringify({
-              output: resultMessage,
-              metadata: { 
-                operation: `todo_${operation}`, 
-                id,
-                title: `Todo ${operation}d`
-              }
-            }),
-            metadata: { operation: "todo", action: operation, id }
-          };
-        }
-
-        default:
-          return {
-            outputText: JSON.stringify({
-              output: `❌ Unknown todo operation: ${operation}\n\nAvailable operations:\n- list: Show all todos\n- add: Create new todo\n- update: Modify existing todo\n- complete: Mark todo as done\n- remove: Delete todo`,
-              metadata: { error: "invalid_operation" }
-            }),
-            metadata: { error: "invalid_operation" }
-          };
+    case "todowrite": {
+      // Write complete todo list - takes full array
+      const { todos } = args;
+      
+      if (!Array.isArray(todos)) {
+        return {
+          outputText: JSON.stringify({
+            output: "Error: todos must be an array",
+            metadata: { error: "invalid_parameter" }
+          }),
+          metadata: { error: "invalid_parameter" }
+        };
       }
+
+      const sessionId = "default"; // Use default session for now
+      const todoFile = path.join(workdir || process.cwd(), '.codex-todos.json');
+      
+      interface TodoItem {
+        id: string;
+        content: string;
+        status: "pending" | "in_progress" | "completed";
+        priority: "high" | "medium" | "low";
+      }
+      
+      interface TodoStorage {
+        [sessionId: string]: Array<TodoItem>;
+      }
+      
+      let todoStorage: TodoStorage = {};
+      
+      try {
+        // Load existing todos with session support
+        if (fsSync.existsSync(todoFile)) {
+          todoStorage = JSON.parse(fsSync.readFileSync(todoFile, 'utf8'));
+        }
+      } catch {
+        todoStorage = {};
+      }
+
+      // Update the todos for this session
+      todoStorage[sessionId] = todos;
+      
+      try {
+        await fs.writeFile(todoFile, JSON.stringify(todoStorage, null, 2));
+      } catch (error) {
+        return {
+          outputText: JSON.stringify({
+            output: `Error writing todos: ${error}`,
+            metadata: { error: "write_failed" }
+          }),
+          metadata: { error: "write_failed" }
+        };
+      }
+
+      const activeTodos = todos.filter((t: TodoItem) => t.status !== "completed");
+
+      return {
+        outputText: JSON.stringify({
+          output: JSON.stringify(todos, null, 2),
+          metadata: { 
+            todos,
+            title: `${activeTodos.length} todos`,
+            operation: "todowrite"
+          }
+        }),
+        metadata: { 
+          todos,
+          title: `${activeTodos.length} todos`,
+          operation: "todowrite"
+        }
+      };
     }
 
     case "task": {

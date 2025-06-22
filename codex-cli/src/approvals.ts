@@ -1,9 +1,6 @@
 import type { ParseEntry, ControlOperator } from "shell-quote";
 
-import {
-  identify_files_added,
-  identify_files_needed,
-} from "./utils/agent/apply-patch";
+
 import * as path from "path";
 import { parse } from "shell-quote";
 

@@ -53,8 +53,8 @@ export function parseToolCall(
   if (toolCallArgs == null) {
     // Check if this is an OpenCode tool by checking the tool name
     const openCodeTools = new Set([
-      'read', 'write', 'edit', 'ls', 'glob', 'grep', 
-      'web_fetch', 'todo', 'task', 'notebook_read', 'notebook_edit'
+      'read', 'write', 'edit', 'multi_edit', 'ls', 'glob', 'grep', 
+      'web_fetch', 'todo', 'todoread', 'todowrite', 'task', 'notebook_read', 'notebook_edit'
     ]);
     
     if (openCodeTools.has(toolCall.name)) {
@@ -99,7 +99,15 @@ function formatOpenCodeToolForDisplay(toolName: string, args: Record<string, unk
       return `write ${args['filePath']}`;
     case 'edit':
       return `edit ${args['filePath']} (${args['replaceAll'] ? 'replace all' : 'replace first'})`;
-
+    case 'multi_edit': {
+      const operations = args['operations'] as Array<{ filePath: string; edits: Array<unknown> }> | undefined;
+      if (operations) {
+        const fileCount = operations.length;
+        const totalEdits = operations.reduce((sum, op) => sum + (op.edits?.length || 0), 0);
+        return `multi_edit (${fileCount} files, ${totalEdits} edits)`;
+      }
+      return 'multi_edit';
+    }
     case 'ls':
       return `ls ${args['path'] || '.'}${args['recursive'] ? ' -R' : ''}`;
     case 'glob':
@@ -110,6 +118,12 @@ function formatOpenCodeToolForDisplay(toolName: string, args: Record<string, unk
       return `web_fetch ${args['url']}`;
     case 'todo':
       return `todo ${args['operation']}${args['content'] ? ` "${args['content']}"` : ''}`;
+    case 'todoread':
+      return `todoread`;
+    case 'todowrite': {
+      const todos = args['todos'] as Array<unknown> | undefined;
+      return `todowrite (${todos?.length || 0} todos)`;
+    }
     case 'task':
       return `task "${args['description']}"`;
     case 'notebook_read':

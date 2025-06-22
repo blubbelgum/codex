@@ -209,6 +209,12 @@ function TerminalChatResponseToolCallOutput({ message, fullStdout }: { message: 
       // not JSON, leave as-is
     }
   }
+  
+  // Check if this is a todo operation (todoread/todowrite)
+  const isTodoOperation = metadata && ((metadata as any).operation === "todoread" || (metadata as any).operation === "todowrite");
+  const todos = (metadata as any)?.todos;
+  const todoTitle = (metadata as any)?.title;
+  
   const { exit_code, duration_seconds } = metadata;
   const metadataInfo = useMemo(
     () =>
@@ -222,6 +228,7 @@ function TerminalChatResponseToolCallOutput({ message, fullStdout }: { message: 
         .join(", "),
     [exit_code, duration_seconds],
   );
+  
   let displayedContent = output;
   if (message.type === "function_call_output" && !fullStdout) {
     const lines = displayedContent.split("\n");
@@ -251,13 +258,21 @@ function TerminalChatResponseToolCallOutput({ message, fullStdout }: { message: 
       return line;
     })
     .join("\n");
+
   return (
     <Box flexDirection="column" gap={1}>
-      <Text color="magenta" bold>
-        command.stdout{" "}
-        <Text dimColor>{metadataInfo ? `(${metadataInfo})` : ""}</Text>
-      </Text>
-      <Text dimColor>{colorizedContent}</Text>
+      {/* Show todo UI for todo operations */}
+      {isTodoOperation && todos ? (
+        <TodoDisplay todos={todos} title={todoTitle} />
+      ) : (
+        <>
+          <Text color="magenta" bold>
+            command.stdout{" "}
+            <Text dimColor>{metadataInfo ? `(${metadataInfo})` : ""}</Text>
+          </Text>
+          <Text dimColor>{colorizedContent}</Text>
+        </>
+      )}
     </Box>
   );
 }
@@ -367,4 +382,59 @@ function rewriteFileCitations(
     // - add a space after the link to make it easier to read
     return `[${label}](${uri}) `;
   });
+}
+
+// Todo display component for terminal
+function TodoDisplay({ todos, title }: { todos: Array<any>; title: string }): React.ReactElement {
+  if (!todos || todos.length === 0) {
+    return (
+      <Box marginTop={1} paddingX={2} flexDirection="column">
+        <Text bold color="yellow">📝 Todo List</Text>
+        <Text dimColor>No todos yet</Text>
+      </Box>
+    );
+  }
+
+  const activeTodos = todos.filter((todo: any) => todo.status !== "completed");
+  const completedTodos = todos.filter((todo: any) => todo.status === "completed");
+
+  return (
+    <Box marginTop={1} paddingX={2} flexDirection="column" gap={1}>
+      <Text bold color="yellow">📋 {title || `${activeTodos.length} todos`}</Text>
+      
+      {activeTodos.length > 0 && (
+        <Box flexDirection="column">
+          <Text bold color="cyan">Active Tasks:</Text>
+          {activeTodos.map((todo: any, index: number) => {
+            const priorityIcon = todo.priority === "high" ? "🔴" : 
+                                todo.priority === "medium" ? "🟡" : "🟢";
+            const statusIcon = todo.status === "in_progress" ? "🔄" : "⏸️";
+            
+            return (
+              <Box key={todo.id || index} flexDirection="row" gap={1}>
+                <Text dimColor>{index + 1}.</Text>
+                <Text>{priorityIcon}</Text>
+                <Text>{statusIcon}</Text>
+                <Text>{todo.content}</Text>
+                <Text dimColor>({todo.id})</Text>
+              </Box>
+            );
+          })}
+        </Box>
+      )}
+      
+      {completedTodos.length > 0 && (
+        <Box flexDirection="column" marginTop={1}>
+          <Text bold color="green">✅ Completed ({completedTodos.length}):</Text>
+          {completedTodos.slice(-3).map((todo: any, index: number) => (
+            <Box key={todo.id || index} flexDirection="row" gap={1}>
+              <Text dimColor>{index + 1}.</Text>
+              <Text>✅</Text>
+              <Text dimColor>{todo.content}</Text>
+            </Box>
+          ))}
+        </Box>
+      )}
+    </Box>
+  );
 }

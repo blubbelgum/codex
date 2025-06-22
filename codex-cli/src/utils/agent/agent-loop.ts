@@ -214,6 +214,60 @@ const editFunctionTool: FunctionTool = {
   },
 };
 
+// Multi-file editing tool - EFFICIENT batch operations
+const multiEditFunctionTool: FunctionTool = {
+  type: "function",
+  name: "multi_edit",
+  description:
+    "PREFERRED for multiple edits. Atomically apply multiple search/replace operations across multiple files. All edits succeed or all rollback. Much more token-efficient than individual edit() calls.",
+  strict: false,
+  parameters: {
+    type: "object",
+    properties: {
+      operations: {
+        type: "array",
+        description: "Array of file operations to apply atomically",
+        items: {
+          type: "object",
+          properties: {
+            filePath: {
+              type: "string",
+              description: "Path to the file to edit"
+            },
+            edits: {
+              type: "array",
+              description: "Array of search/replace operations for this file",
+              items: {
+                type: "object",
+                properties: {
+                  old_string: {
+                    type: "string",
+                    description: "Exact literal text to search for (copy from read() output)"
+                  },
+                  new_string: {
+                    type: "string", 
+                    description: "Exact literal text to replace with"
+                  },
+                  replace_all: {
+                    type: "boolean",
+                    description: "Replace all occurrences (default: false)"
+                  }
+                },
+                required: ["old_string", "new_string"],
+                additionalProperties: false
+              }
+            }
+          },
+          required: ["filePath", "edits"],
+          additionalProperties: false
+        }
+      }
+    },
+    required: ["operations"],
+    additionalProperties: false,
+  },
+};
+
 // Individual edit() calls provide better reliability than batch operations
 
 // Directory listing tool
@@ -341,44 +395,7 @@ const webFetchFunctionTool: FunctionTool = {
   },
 };
 
-// Task management tool
-const todoFunctionTool: FunctionTool = {
-  type: "function",
-  name: "todo",
-  description:
-    "Manage a todo list for tracking tasks. Operations: list, add, update, complete, remove.",
-  strict: false,
-  parameters: {
-    type: "object",
-    properties: {
-      operation: {
-        type: "string",
-        enum: ["list", "add", "update", "complete", "remove"],
-        description: "Todo operation to perform",
-      },
-      id: {
-        type: "string",
-        description: "Todo item ID (for update/complete/remove)",
-      },
-      content: {
-        type: "string",
-        description: "Todo content (for add/update)",
-      },
-      priority: {
-        type: "string",
-        enum: ["high", "medium", "low"],
-        description: "Priority level",
-      },
-      status: {
-        type: "string",
-        enum: ["pending", "in_progress", "completed"],
-        description: "Status (for update)",
-      },
-    },
-    required: ["operation"],
-    additionalProperties: false,
-  },
-};
+
 
 // Sub-agent launching tool
 const taskFunctionTool: FunctionTool = {
@@ -872,9 +889,10 @@ export class AgentLoop {
       // Use shell-specific parsing for shell/exec commands
       args = parseToolCallArguments(rawArguments ?? "{}");
     } else if (name === "web_search" || name === "task_management" || 
-               name === "read" || name === "write" || name === "edit" ||
+               name === "read" || name === "write" || name === "edit" || name === "multi_edit" ||
                name === "ls" || name === "glob" || name === "grep" || name === "web_fetch" || 
-               name === "todo" || name === "task" || name === "notebook_read" || name === "notebook_edit") {
+               name === "todo" || name === "todoread" || name === "todowrite" ||
+               name === "task" || name === "notebook_read" || name === "notebook_edit") {
       // For modern file operation tools, use the parsed JSON directly
       args = parsedArgs || {};
     } else {
@@ -1000,9 +1018,10 @@ export class AgentLoop {
           metadata: { exit_code: 1, duration_seconds: duration },
         });
       }
-    } else if (name === "read" || name === "write" || name === "edit" || 
+    } else if (name === "read" || name === "write" || name === "edit" || name === "multi_edit" ||
                name === "ls" || name === "glob" || name === "grep" || name === "web_fetch" || 
-               name === "todo" || name === "task" || name === "notebook_read" || name === "notebook_edit") {
+               name === "todo" || name === "todoread" || name === "todowrite" ||
+               name === "task" || name === "notebook_read" || name === "notebook_edit") {
       // Handle all file and utility tools via handleExecCommand
       // Ensure args is never undefined to prevent JSON.stringify issues
       const safeArgs = args || {};
@@ -1188,6 +1207,7 @@ export class AgentLoop {
         readFunctionTool,
         writeFunctionTool,
         editFunctionTool,
+        multiEditFunctionTool,
         // DIRECTORY/SEARCH OPERATIONS
         lsFunctionTool,
         globFunctionTool,
@@ -1195,7 +1215,8 @@ export class AgentLoop {
         // UTILITY TOOLS
         webSearchFunctionTool,
         webFetchFunctionTool,
-        todoFunctionTool,
+        todoReadTool,
+        todoWriteTool,
         taskFunctionTool,
         notebookReadFunctionTool,
         notebookEditFunctionTool,
@@ -1210,6 +1231,7 @@ export class AgentLoop {
           readFunctionTool,
           writeFunctionTool,
           editFunctionTool,
+          multiEditFunctionTool,
           // DIRECTORY/SEARCH OPERATIONS
           lsFunctionTool,
           globFunctionTool,
@@ -1217,7 +1239,8 @@ export class AgentLoop {
           // UTILITY TOOLS
           webSearchFunctionTool,
           webFetchFunctionTool,
-          todoFunctionTool,
+          todoReadTool,
+          todoWriteTool,
           taskFunctionTool,
           notebookReadFunctionTool,
           notebookEditFunctionTool,
@@ -1231,6 +1254,7 @@ export class AgentLoop {
           readFunctionTool,
           writeFunctionTool,
           editFunctionTool,
+          multiEditFunctionTool,
           // DIRECTORY/SEARCH OPERATIONS
           lsFunctionTool,
           globFunctionTool,
@@ -1238,7 +1262,8 @@ export class AgentLoop {
           // UTILITY TOOLS
           webSearchFunctionTool,
           webFetchFunctionTool,
-          todoFunctionTool,
+          todoReadTool,
+          todoWriteTool,
           taskFunctionTool,
           notebookReadFunctionTool,
           notebookEditFunctionTool,
@@ -2268,28 +2293,34 @@ const prefix = `You are Codex CLI, a terminal-native AI coding assistant. Help d
 - When running non-trivial commands, briefly explain what and why
 - Don't use emojis unless explicitly requested
 - Minimize output tokens while maintaining helpfulness
+- Create a todo list for each task and update it frequently (see todoread() and todowrite()) - this is critical for organizing work and demonstrating thoroughness to users
 
 **CRITICAL: ALWAYS USE FUNCTION CALLS FOR FILE OPERATIONS**
 
 ### Core Tools (Function Calls Only):
 - **read({filePath})** - Read file contents first
 - **write({filePath, content})** - Create/overwrite files  
-- **edit({filePath, search, replace})** - Modify with EXACT literal text (no regex patterns, escape sequences)
+- **edit({filePath, search, replace})** - Single file modification with EXACT literal text
+- **multi_edit({operations: [...]})** - ⭐ PREFERRED for multiple edits - atomic batch operations
 - **ls({path})** - List directories
 - **glob({pattern})** - Find files by pattern
 - **grep({pattern, path})** - Search text
 - **web_search({query})** - Find information
-- **todo({operation, content})** - Task management
+- **todoread()** - Read current todo list (no parameters)
+- **todowrite({todos: [...]})** - Update complete todo list
 - **shell({command})** - For non-file operations only (npm, git, etc.)
 
-### Task Management:
-Use todo() tool frequently to plan and track tasks:
-- Break complex tasks into smaller steps
-- Mark todos as in_progress and completed
-- Give users visibility into your progress
+### Task Management - USE VERY FREQUENTLY:
+- **todoread()** - Read current todos at conversation start, before new tasks, when uncertain, after completing tasks
+- **todowrite({todos: [...]})** - Plan tasks, break complex work into steps, track progress systematically
+- Critical for organizing work and demonstrating thoroughness to users
+- Mark todos complete immediately when done - don't batch updates
+- Example: todowrite({todos: [{id:"1", content:"Read files", status:"completed", priority:"medium"}, {id:"2", content:"Implement feature", status:"in_progress", priority:"high"}]})
 
-### Tool Usage Policy:
-- Batch multiple independent tool calls in single response
+### Tool Usage Policy - TOKEN EFFICIENCY CRITICAL:
+- **ALWAYS use multi_edit() for multiple file changes** - saves 80% tokens vs individual edits
+- **Read files once, plan all edits, execute batch** - avoid read→edit→read→edit loops
+- **Batch multiple independent tool calls in single response**
 - Read files before editing to understand exact content
 - Use exact literal text from read() output in edit() search parameter
 - Never use shell commands for file operations
@@ -2330,3 +2361,60 @@ function filterToApiMessages(
     return true;
   });
 }
+
+// Todo management tools following OpenCode patterns
+const todoReadTool: FunctionTool = {
+  type: "function",
+  name: "todoread",
+  description: "Read the current todo list. Use frequently to track progress - at conversation start, before new tasks, when uncertain about next steps, after completing tasks.",
+  strict: false,
+  parameters: {
+    type: "object",
+    properties: {},
+    required: [],
+    additionalProperties: false,
+  },
+};
+
+const todoWriteTool: FunctionTool = {
+  type: "function", 
+  name: "todowrite",
+  description: "Create and manage a structured task list. Use to plan tasks, break down complex work into steps, and track progress. Critical for organizing and demonstrating thoroughness.",
+  strict: false,
+  parameters: {
+    type: "object",
+    properties: {
+      todos: {
+        type: "array",
+        description: "The complete updated todo list",
+        items: {
+          type: "object",
+          properties: {
+            id: {
+              type: "string",
+              description: "Unique identifier for the todo item"
+            },
+            content: {
+              type: "string", 
+              description: "Brief description of the task"
+            },
+            status: {
+              type: "string",
+              enum: ["pending", "in_progress", "completed"],
+              description: "Current status of the task"
+            },
+            priority: {
+              type: "string",
+              enum: ["high", "medium", "low"], 
+              description: "Priority level of the task"
+            }
+          },
+          required: ["id", "content", "status", "priority"],
+          additionalProperties: false
+        }
+      }
+    },
+    required: ["todos"],
+    additionalProperties: false,
+  },
+};
