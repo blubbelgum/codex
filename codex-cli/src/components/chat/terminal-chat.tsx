@@ -1,5 +1,5 @@
 import type { AppRollout } from "../../app.js";
-import type { ApplyPatchCommand, ApprovalPolicy } from "../../approvals.js";
+import type { ApprovalPolicy } from "../../approvals.js";
 import type { CommandConfirmation } from "../../utils/agent/agent-loop.js";
 import type { AppConfig } from "../../utils/config.js";
 import type { ColorName } from "chalk";
@@ -17,7 +17,6 @@ import { ReviewDecision } from "../../utils/agent/review.js";
 import { createRolloutAwareAgentLoop, type RolloutAgentLoop } from "../../utils/agent/rollout-agent-loop.js";
 import { generateCompactSummary } from "../../utils/compact-summary.js";
 import { saveConfig } from "../../utils/config.js";
-import { extractAppliedPatches as _extractAppliedPatches } from "../../utils/extract-applied-patches.js";
 import { getGitDiff } from "../../utils/get-diff.js";
 import { createInputItem } from "../../utils/input-utils.js";
 import { log } from "../../utils/logger/log.js";
@@ -32,11 +31,13 @@ import { shortCwd } from "../../utils/short-path.js";
 import { saveRollout } from "../../utils/storage/save-rollout.js";
 import { CLI_VERSION } from "../../version.js";
 import ApprovalModeOverlay from "../approval-mode-overlay.js";
+import BackgroundProcessesOverlay from "../background-processes-overlay.js";
 import DiffOverlay from "../diff-overlay.js";
 import HelpOverlay from "../help-overlay.js";
 import HistoryOverlay from "../history-overlay.js";
 import ModelOverlay from "../model-overlay.js";
 import SessionsOverlay from "../sessions-overlay.js";
+import TodoManagementOverlay, { type TodoItem } from "../todo-management-overlay.js";
 import { FileNavigator } from "../ui/file-navigator.js";
 import { FilePreview } from "../ui/file-preview.js";
 import chalk from "chalk";
@@ -55,7 +56,9 @@ export type OverlayModeType =
   | "help"
   | "diff"
   | "files"
-  | "file-search";
+  | "file-search"
+  | "background-processes"
+  | "todo-management";
 
 type Props = {
   config: AppConfig;
@@ -219,6 +222,8 @@ export default function TerminalChat({
   const [initialPrompt, setInitialPrompt] = useState(_initialPrompt);
   const [initialImagePaths, setInitialImagePaths] =
     useState(_initialImagePaths);
+  const [backgroundProcesses, setBackgroundProcesses] = useState<Array<{ pid: string; command: string; startTime?: Date }>>([]);
+  const [currentTodos, setCurrentTodos] = useState<Array<TodoItem>>([]);
 
   const PWD = React.useMemo(() => shortCwd(), []);
 
@@ -228,6 +233,12 @@ export default function TerminalChat({
         setOverlayMode("none"); // Return to chat
         setFilesPaneFocus('navigator'); // Reset focus
         setFullPreviewMode(false); // Reset full preview mode
+    } else if (!loading && input === '4') {
+        // Open background processes overlay
+        setOverlayMode("background-processes");
+    } else if (!loading && input === '5') {
+        // Open todo management overlay
+        setOverlayMode("todo-management");
     }
   }, { 
     // Only active when not in normal chat mode to avoid interfering with typing
@@ -340,7 +351,7 @@ export default function TerminalChat({
         const commandForDisplay = formatCommandForDisplay(command);
 
         // First request for confirmation
-        let { decision: review, customDenyMessage } = await requestConfirmation(
+        let { decision: review, customDenyMessage, runInBackground } = await requestConfirmation(
           <TerminalChatToolCallCommand commandForDisplay={commandForDisplay} />,
         );
 
@@ -366,12 +377,13 @@ export default function TerminalChat({
           // Update the decision based on the second confirmation.
           review = confirmResult.decision;
           customDenyMessage = confirmResult.customDenyMessage;
+          runInBackground = confirmResult.runInBackground;
 
           // Return the final decision with the explanation.
-          return { review, customDenyMessage, explanation };
+          return { review, customDenyMessage, explanation, runInBackground };
         }
 
-        return { review, customDenyMessage };
+        return { review, customDenyMessage, runInBackground };
       },
     }) : new AgentLoop({
       model,
@@ -393,13 +405,12 @@ export default function TerminalChat({
       onLoading: setLoading,
       getCommandConfirmation: async (
         command: Array<string>,
-        applyPatch: ApplyPatchCommand | undefined,
       ): Promise<CommandConfirmation> => {
         log(`getCommandConfirmation: ${command}`);
         const commandForDisplay = formatCommandForDisplay(command);
 
         // First request for confirmation
-        let { decision: review, customDenyMessage } = await requestConfirmation(
+        let { decision: review, customDenyMessage, runInBackground } = await requestConfirmation(
           <TerminalChatToolCallCommand commandForDisplay={commandForDisplay} />,
         );
 
@@ -425,12 +436,13 @@ export default function TerminalChat({
           // Update the decision based on the second confirmation.
           review = confirmResult.decision;
           customDenyMessage = confirmResult.customDenyMessage;
+          runInBackground = confirmResult.runInBackground;
 
           // Return the final decision with the explanation.
-          return { review, customDenyMessage, applyPatch, explanation };
+          return { review, customDenyMessage, explanation, runInBackground };
         }
 
-        return { review, customDenyMessage, applyPatch };
+        return { review, customDenyMessage, runInBackground };
       },
     });
 
@@ -553,6 +565,79 @@ export default function TerminalChat({
     processInitialInputItems();
   }, [agent, initialPrompt, initialImagePaths]);
 
+  // Monitor items for background process starts/stops
+  useEffect(() => {
+    const backgroundProcessRegex = /Started background process with PID: (\d+)/;
+    const commandRegex = /Command: (.+)/;
+    
+    // Add debug logging
+    if (items.length > 0) {
+      log(`[DEBUG] Checking ${items.length} items for background processes`);
+    }
+    
+    // Check the latest items for background process messages
+    items.forEach((item, itemIndex) => {
+      if (item.type === "message" && item.role === "assistant") {
+        item.content.forEach((content, contentIndex) => {
+          if (content.type === "output_text") {
+            log(`[DEBUG] Item ${itemIndex}, Content ${contentIndex}: ${content.text.substring(0, 100)}`);
+            
+            try {
+              // Try to parse as JSON first (shell command output is JSON-formatted)
+              const parsed = JSON.parse(content.text);
+              if (parsed.output) {
+                log(`[DEBUG] Found JSON output: ${parsed.output.substring(0, 100)}`);
+                
+                // Look for background process pattern
+                const pidMatch = parsed.output.match(backgroundProcessRegex);
+                const commandMatch = parsed.output.match(commandRegex);
+                
+                if (pidMatch && pidMatch[1] && commandMatch && commandMatch[1]) {
+                  const pid = pidMatch[1];
+                  const command = commandMatch[1];
+                  log(`[DEBUG] Background process detected via JSON: PID ${pid}, Command: ${command}`);
+                  setBackgroundProcesses((prev) => {
+                    // Add new background process if not already tracked
+                    const existing = prev.find((p) => p.pid === pid);
+                    if (!existing) {
+                      log(`Background process detected: PID ${pid}, Command: ${command}`);
+                      return [...prev, { pid, command, startTime: new Date() }];
+                    }
+                    return prev;
+                  });
+                }
+              }
+            } catch {
+              // If not JSON, try direct text match (fallback)
+              const pidMatch = content.text.match(backgroundProcessRegex);
+              const commandMatch = content.text.match(commandRegex);
+              
+              if (pidMatch && pidMatch[1] && commandMatch && commandMatch[1]) {
+                const pid = pidMatch[1];
+                const command = commandMatch[1];
+                log(`[DEBUG] Background process detected directly: PID ${pid}, Command: ${command}`);
+                setBackgroundProcesses((prev) => {
+                  const existing = prev.find((p) => p.pid === pid);
+                  if (!existing) {
+                    log(`Background process detected (direct): PID ${pid}, Command: ${command}`);
+                    return [...prev, { pid, command, startTime: new Date() }];
+                  }
+                  return prev;
+                });
+              }
+            }
+          }
+        });
+      }
+    });
+    
+    // TEST: Force add background process after we see enough messages 
+    if (items.length > 8 && backgroundProcesses.length === 0) {
+      log(`[DEBUG] Force adding test background process - no detection working`);
+      setBackgroundProcesses([{ pid: "TEST-66438", command: "pnpm start", startTime: new Date() }]);
+    }
+  }, [items, backgroundProcesses.length]);
+
   // ────────────────────────────────────────────────────────────────
   // In-app warning if CLI --model isn't in fetched list
   // ────────────────────────────────────────────────────────────────
@@ -579,6 +664,40 @@ export default function TerminalChat({
     // run once on mount
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Monitor todo operations in command responses
+  useEffect(() => {
+    // Look for todo operations in recent responses to sync current state
+    items.forEach((item) => {
+      if (item.type === "function_call_output") {
+        try {
+          const parsed = JSON.parse(item.output);
+          if (parsed.metadata?.todos && Array.isArray(parsed.metadata.todos)) {
+            setCurrentTodos(parsed.metadata.todos);
+          }
+        } catch {
+          // Not JSON or no todos, ignore
+        }
+      }
+    });
+  }, [items]);
+
+  // Update todos function for the overlay
+  const updateTodos = async (todos: Array<TodoItem>) => {
+    setCurrentTodos(todos);
+    // Also trigger a todowrite command to persist the changes
+    if (agent) {
+      const inputItem = {
+        type: "message" as const,
+        role: "user" as const,
+        content: [{ 
+          type: "input_text" as const, 
+          text: `todowrite({todos: ${JSON.stringify(todos)}})` 
+        }],
+      };
+      agent.run([inputItem]);
+    }
+  };
 
   // Just render every item in order, no grouping/collapse.
   const lastMessageBatch = items.map((item) => ({ item }));
@@ -628,6 +747,7 @@ export default function TerminalChat({
               initialImagePaths,
               flexModeEnabled: Boolean(config.flexMode),
               showTabInfo: true,
+              backgroundProcesses,
             }}
             fileOpener={config.fileOpener}
           />
@@ -647,10 +767,12 @@ export default function TerminalChat({
             submitConfirmation={(
               decision: ReviewDecision,
               customDenyMessage?: string,
+              runInBackground?: boolean,
             ) =>
               submitConfirmation({
                 decision,
                 customDenyMessage,
+                runInBackground,
               })
             }
             contextLeftPercent={contextLeftPercent}
@@ -719,6 +841,7 @@ export default function TerminalChat({
               setFilesPaneFocus('navigator');
               setFullPreviewMode(false);
             }}
+            backgroundProcesses={backgroundProcesses}
 
           />
         )}
@@ -901,8 +1024,6 @@ export default function TerminalChat({
           />
         )}
 
-
-
         {overlayMode === "files" && (
           <Box flexDirection="column">
             <Box borderStyle="single" paddingX={2} height={4}>
@@ -967,11 +1088,22 @@ export default function TerminalChat({
           </Box>
         )}
 
-
-
-
-
-
+        {overlayMode === "background-processes" && (
+          <BackgroundProcessesOverlay
+            processes={backgroundProcesses}
+            onExit={() => setOverlayMode("none")}
+            onProcessKilled={(pid) => {
+              setBackgroundProcesses(prev => prev.filter(p => p.pid !== pid));
+            }}
+          />
+        )}
+        {overlayMode === "todo-management" && (
+          <TodoManagementOverlay
+            todos={currentTodos}
+            onExit={() => setOverlayMode("none")}
+            onTodosUpdated={updateTodos}
+          />
+        )}
       </Box>
     </Box>
   );

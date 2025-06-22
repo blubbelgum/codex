@@ -469,12 +469,12 @@ export function applySearchReplaceDiff(filePath: string, diffContent: string, wo
         debugInfo += `5. Avoid complex multi-line searches - prefer single distinctive lines\n\n`;
         
         debugInfo += `COMMON MISTAKES TO AVOID:\n`;
-        debugInfo += `❌ Using regex patterns: [\\s\\S]*, \\d+, etc.\n`;
-        debugInfo += `❌ Using escape sequences: \\n, \\t, \\$, etc.\n`;
-        debugInfo += `❌ Trying to match multiple paragraphs at once\n`;
-        debugInfo += `✅ Use exact literal text from read() output\n`;
-        debugInfo += `✅ Search for unique function names or comments\n`;
-        debugInfo += `✅ Use line-by-line approach for complex changes\n\n`;
+        debugInfo += `AVOID: Using regex patterns: [\\s\\S]*, \\d+, etc.\n`;
+        debugInfo += `AVOID: Using escape sequences: \\n, \\t, \\$, etc.\n`;
+        debugInfo += `AVOID: Trying to match multiple paragraphs at once\n`;
+        debugInfo += `DO: Use exact literal text from read() output\n`;
+        debugInfo += `DO: Search for unique function names or comments\n`;
+        debugInfo += `DO: Use line-by-line approach for complex changes\n\n`;
         
         // Try to suggest similar content
         if (searchLines.length > 0 && searchLines[0]) {

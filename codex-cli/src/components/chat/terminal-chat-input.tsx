@@ -38,6 +38,35 @@ const suggestions = [
   "are there any bugs in my code?",
 ];
 
+export interface TerminalChatInputProps {
+  loading: boolean;
+  setItems: React.Dispatch<React.SetStateAction<Array<ResponseItem>>>;
+  isNew: boolean;
+  setLastResponseId: React.Dispatch<React.SetStateAction<string | null>>;
+  confirmationPrompt: React.ReactNode;
+  explanation?: string;
+  submitConfirmation: (
+    decision: ReviewDecision,
+    customDenyMessage?: string,
+    runInBackground?: boolean,
+  ) => void;
+  contextLeftPercent: number;
+  openOverlay: () => void;
+  openModelOverlay: () => void;
+  openApprovalOverlay: () => void;
+  openHelpOverlay: () => void;
+  openSessionsOverlay: () => void;
+  openDiffOverlay: () => void;
+  onCompact: () => void;
+  active: boolean;
+  interruptAgent: () => void;
+  submitInput: (inputs: Array<ResponseInputItem>) => Record<string, unknown>;
+  items: Array<ResponseItem>;
+  thinkingSeconds: number;
+  onSwitchToFiles: () => void;
+  backgroundProcesses?: Array<{ pid: string; command: string }>;
+}
+
 export default function TerminalChatInput({
   isNew,
   loading,
@@ -62,35 +91,8 @@ export default function TerminalChatInput({
   thinkingSeconds,
   items = [],
   onSwitchToFiles,
-}: {
-  isNew: boolean;
-  loading: boolean;
-  submitInput: (input: Array<ResponseInputItem>) => void;
-  confirmationPrompt: React.ReactNode | null;
-  explanation?: string;
-  submitConfirmation: (
-    decision: ReviewDecision,
-    customDenyMessage?: string,
-  ) => void;
-  setLastResponseId: (lastResponseId: string) => void;
-  setItems: React.Dispatch<React.SetStateAction<Array<ResponseItem>>>;
-  contextLeftPercent: number;
-  openOverlay: () => void;
-  openModelOverlay: () => void;
-  openApprovalOverlay: () => void;
-  openHelpOverlay: () => void;
-  openDiffOverlay: () => void;
-  openSessionsOverlay: () => void;
-
-
-  onCompact: () => void;
-  interruptAgent: () => void;
-  active: boolean;
-  thinkingSeconds: number;
-  // New: current conversation items so we can include them in bug reports
-  items?: Array<ResponseItem>;
-  onSwitchToFiles?: () => void;
-}): React.ReactElement {
+  backgroundProcesses,
+}: TerminalChatInputProps): React.ReactElement {
   // Track whether the input is focused (allows typing) or unfocused (allows tab switching)
   const [inputFocused, setInputFocused] = useState(true);
   // Slash command suggestion index
@@ -1042,7 +1044,8 @@ export default function TerminalChatInput({
         {isNew && !input ? (
           <Box flexDirection="column" gap={1}>
             <Text>
-              <Text color="cyan" bold>Welcome to Codex CLI!</Text> Here are some ways to get started:
+              <Text color="cyan" bold>Welcome to
+ Codex CLI!</Text> Here are some ways to get started:
             </Text>
             <Box flexDirection="column" paddingLeft={2}>
               {suggestions.map((m, key) => (
@@ -1094,6 +1097,12 @@ export default function TerminalChatInput({
                 )}
               </Box>
             )}
+            {/* Background process indicator - always visible */}
+            <Box gap={1}>
+              <Text color="magenta">
+                Background: <Text bold>{backgroundProcesses && backgroundProcesses.length > 0 ? '[●]' : '[○]'} {backgroundProcesses?.length || 0} process{(backgroundProcesses?.length || 0) !== 1 ? 'es' : ''} running</Text>
+              </Text>
+            </Box>
           </Box>
         )}
       </Box>

@@ -22,16 +22,17 @@ export function TerminalChatCommandReview({
   isActive = true,
 }: {
   confirmationPrompt: React.ReactNode;
-  onReviewCommand: (decision: ReviewDecision, customMessage?: string) => void;
+  onReviewCommand: (decision: ReviewDecision, customMessage?: string, runInBackground?: boolean) => void;
   onSwitchApprovalMode: () => void;
   explanation?: string;
   // when false, disable the underlying Select so it won't capture input
   isActive?: boolean;
 }): React.ReactElement {
-  const [mode, setMode] = React.useState<"select" | "input" | "explanation">(
+  const [mode, setMode] = React.useState<"select" | "input" | "explanation" | "background">(
     "select",
   );
   const [explanation, setExplanation] = React.useState<string>("");
+  const [runInBackground, setRunInBackground] = React.useState<boolean>(false);
 
   // If the component receives an explanation prop, update the state
   React.useEffect(() => {
@@ -78,6 +79,7 @@ export function TerminalChatCommandReview({
       | { label: string; value: ReviewDecision }
       | { label: string; value: "edit" }
       | { label: string; value: "switch" }
+      | { label: string; value: "background" }
     > = [
       {
         label: "Yes (y)",
@@ -93,6 +95,10 @@ export function TerminalChatCommandReview({
     }
 
     opts.push(
+      {
+        label: "Yes, run in background (b)",
+        value: "background",
+      },
       {
         label: "Explain this command (x)",
         value: ReviewDecision.EXPLAIN,
@@ -123,27 +129,39 @@ export function TerminalChatCommandReview({
     (input, key) => {
       if (mode === "select") {
         if (input === "y") {
-          onReviewCommand(ReviewDecision.YES);
+          onReviewCommand(ReviewDecision.YES, undefined, false);
+        } else if (input === "b") {
+          onReviewCommand(ReviewDecision.YES, undefined, true);
         } else if (input === "x") {
-          onReviewCommand(ReviewDecision.EXPLAIN);
+          onReviewCommand(ReviewDecision.EXPLAIN, undefined, false);
         } else if (input === "e") {
           setMode("input");
         } else if (input === "n") {
           onReviewCommand(
             ReviewDecision.NO_CONTINUE,
             "Don't do that, keep going though",
+            false
           );
         } else if (input === "a" && showAlwaysApprove) {
-          onReviewCommand(ReviewDecision.ALWAYS);
+          onReviewCommand(ReviewDecision.ALWAYS, undefined, false);
         } else if (input === "s") {
           // switch approval mode
           onSwitchApprovalMode();
         } else if (key.escape) {
-          onReviewCommand(ReviewDecision.NO_EXIT);
+          onReviewCommand(ReviewDecision.NO_EXIT, undefined, false);
         }
       } else if (mode === "explanation") {
         // When in explanation mode, any key returns to select mode
         if (key.return || key.escape || input === "x") {
+          setMode("select");
+        }
+      } else if (mode === "background") {
+        // Background confirmation mode
+        if (input === "y" || key.return) {
+          setRunInBackground(true);
+          onReviewCommand(ReviewDecision.YES, undefined, true);
+        } else if (input === "n" || key.escape) {
+          setRunInBackground(false);
           setMode("select");
         }
       } else {
@@ -151,12 +169,13 @@ export function TerminalChatCommandReview({
         if (key.return) {
           // if user hit enter on empty msg, fall back to DEFAULT_DENY_MESSAGE
           const custom = msg.trim() === "" ? DEFAULT_DENY_MESSAGE : msg;
-          onReviewCommand(ReviewDecision.NO_CONTINUE, custom);
+          onReviewCommand(ReviewDecision.NO_CONTINUE, custom, false);
         } else if (key.escape) {
           // treat escape as denial with default message as well
           onReviewCommand(
             ReviewDecision.NO_CONTINUE,
             msg.trim() === "" ? DEFAULT_DENY_MESSAGE : msg,
+            false
           );
         }
       }
@@ -167,6 +186,11 @@ export function TerminalChatCommandReview({
   return (
     <Box flexDirection="column" gap={1} borderStyle="round" marginTop={1}>
       {confirmationPrompt}
+      {runInBackground && (
+        <Box paddingX={2}>
+          <Text color="yellow" bold>⚡ This command will run in background</Text>
+        </Box>
+      )}
       <Box flexDirection="column" gap={1}>
         {mode === "explanation" ? (
           <>
@@ -212,13 +236,15 @@ export function TerminalChatCommandReview({
               <Select
                 isDisabled={!isActive}
                 visibleOptionCount={approvalOptions.length}
-                onChange={(value: ReviewDecision | "edit" | "switch") => {
+                onChange={(value: ReviewDecision | "edit" | "switch" | "background") => {
                   if (value === "edit") {
                     setMode("input");
                   } else if (value === "switch") {
                     onSwitchApprovalMode();
+                  } else if (value === "background") {
+                    onReviewCommand(ReviewDecision.YES, undefined, true);
                   } else {
-                    onReviewCommand(value);
+                    onReviewCommand(value, undefined, false);
                   }
                 }}
                 options={approvalOptions}

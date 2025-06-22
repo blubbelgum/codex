@@ -389,7 +389,7 @@ function TodoDisplay({ todos, title }: { todos: Array<any>; title: string }): Re
   if (!todos || todos.length === 0) {
     return (
       <Box marginTop={1} paddingX={2} flexDirection="column">
-        <Text bold color="yellow">📝 Todo List</Text>
+        <Text bold>Todo List</Text>
         <Text dimColor>No todos yet</Text>
       </Box>
     );
@@ -398,41 +398,58 @@ function TodoDisplay({ todos, title }: { todos: Array<any>; title: string }): Re
   const activeTodos = todos.filter((todo: any) => todo.status !== "completed");
   const completedTodos = todos.filter((todo: any) => todo.status === "completed");
 
+  const getCheckbox = (status: string) => {
+    switch (status) {
+      case 'completed': return '[x]';
+      case 'in_progress': return '[~]';
+      case 'pending': return '[ ]';
+      default: return '[ ]';
+    }
+  };
+
+  const getPriorityIndicator = (priority: string) => {
+    switch (priority) {
+      case 'high': return '!!!';
+      case 'medium': return '!!';
+      case 'low': return '!';
+      default: return '!';
+    }
+  };
+
   return (
     <Box marginTop={1} paddingX={2} flexDirection="column" gap={1}>
-      <Text bold color="yellow">📋 {title || `${activeTodos.length} todos`}</Text>
+      <Text bold>{title || `${activeTodos.length} active, ${completedTodos.length} completed`}</Text>
       
       {activeTodos.length > 0 && (
         <Box flexDirection="column">
           <Text bold color="cyan">Active Tasks:</Text>
-          {activeTodos.map((todo: any, index: number) => {
-            const priorityIcon = todo.priority === "high" ? "🔴" : 
-                                todo.priority === "medium" ? "🟡" : "🟢";
-            const statusIcon = todo.status === "in_progress" ? "🔄" : "⏸️";
-            
-            return (
-              <Box key={todo.id || index} flexDirection="row" gap={1}>
-                <Text dimColor>{index + 1}.</Text>
-                <Text>{priorityIcon}</Text>
-                <Text>{statusIcon}</Text>
-                <Text>{todo.content}</Text>
-                <Text dimColor>({todo.id})</Text>
-              </Box>
-            );
-          })}
+          {activeTodos.map((todo: any, index: number) => (
+            <Box key={todo.id || index} flexDirection="row" gap={1}>
+              <Text>{getCheckbox(todo.status)}</Text>
+              <Text color={todo.priority === 'high' ? 'red' : todo.priority === 'medium' ? 'yellow' : 'green'}>
+                {getPriorityIndicator(todo.priority)}
+              </Text>
+              <Text>{todo.content}</Text>
+              <Text dimColor>#{todo.id}</Text>
+            </Box>
+          ))}
         </Box>
       )}
       
       {completedTodos.length > 0 && (
         <Box flexDirection="column" marginTop={1}>
-          <Text bold color="green">✅ Completed ({completedTodos.length}):</Text>
+          <Text bold color="green">Completed:</Text>
           {completedTodos.slice(-3).map((todo: any, index: number) => (
             <Box key={todo.id || index} flexDirection="row" gap={1}>
-              <Text dimColor>{index + 1}.</Text>
-              <Text>✅</Text>
-              <Text dimColor>{todo.content}</Text>
+              <Text strikethrough dimColor>{getCheckbox(todo.status)}</Text>
+              <Text strikethrough dimColor>{getPriorityIndicator(todo.priority)}</Text>
+              <Text strikethrough dimColor>{todo.content}</Text>
+              <Text strikethrough dimColor>#{todo.id}</Text>
             </Box>
           ))}
+          {completedTodos.length > 3 && (
+            <Text dimColor>... and {completedTodos.length - 3} more</Text>
+          )}
         </Box>
       )}
     </Box>

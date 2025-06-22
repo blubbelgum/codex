@@ -6,6 +6,7 @@ import { useState, useCallback, useRef } from "react";
 type ConfirmationResult = {
   decision: ReviewDecision;
   customDenyMessage?: string;
+  runInBackground?: boolean;
 };
 
 type ConfirmationItem = {

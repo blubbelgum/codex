@@ -36,6 +36,7 @@ export interface TerminalHeaderProps {
   initialImagePaths?: Array<string>;
   flexModeEnabled?: boolean;
   showTabInfo?: boolean;
+  backgroundProcesses?: Array<{ pid: string; command: string }>;
 }
 
 const TerminalHeader: React.FC<TerminalHeaderProps> = ({
@@ -50,6 +51,7 @@ const TerminalHeader: React.FC<TerminalHeaderProps> = ({
   initialImagePaths,
   flexModeEnabled = false,
   showTabInfo = false,
+  backgroundProcesses = [],
 }) => {
   return (
     <Box justifyContent="center" width="100%">
@@ -131,7 +133,18 @@ const TerminalHeader: React.FC<TerminalHeaderProps> = ({
                 <Text color="blueBright">↳</Text> tabs:{" "}
                 <Text bold color="cyan">[1] Chat</Text>{" "}
                 <Text bold color="yellow">[2] Files</Text>{" "}
-                <Text bold color="gray">[3] Reserved</Text>
+                <Text bold color="gray">[3] Reserved</Text>{" "}
+                {backgroundProcesses.length > 0 && (
+                  <Text bold color="red">[4] Processes</Text>
+                )}{" "}
+                <Text bold color="magenta">[5] Todos</Text>
+              </Text>
+            )}
+            {backgroundProcesses.length > 0 && (
+              <Text dimColor>
+                <Text color="blueBright">↳</Text> background:{" "}
+                <Text bold color="magenta">[●] {backgroundProcesses.length} process{backgroundProcesses.length > 1 ? 'es' : ''} running</Text>
+                <Text dimColor> (press 4 for details)</Text>
               </Text>
             )}
           </Box>

@@ -11,8 +11,7 @@ import { exec } from "./exec.js";
 import { 
   readFile, 
   writeToFile, 
-  applySearchReplaceDiff,
-  handleUnifiedDiffCommand
+  applySearchReplaceDiff
 } from './handle-unified-diff.js';
 import { adaptCommandForPlatform } from "./platform-commands.js";
 import { ReviewDecision } from "./review.js";
@@ -218,7 +217,7 @@ function generateWindowsCommandSuggestion(
     const suggestions = [
       `${error}`,
       ``,
-      `💡 Windows Command Recovery Suggestions:`,
+      `Windows Command Recovery Suggestions:`,
       ``,
     ];
     
@@ -420,8 +419,8 @@ async function handleOpenCodeTools(
       const { operations } = args;
       
       if (!operations || !Array.isArray(operations)) {
-        return {
-          outputText: JSON.stringify({
+      return {
+        outputText: JSON.stringify({
             output: "Error: multi_edit requires 'operations' array\n\nFormat: multi_edit({operations: [{filePath: 'file.js', edits: [{old_string: 'search', new_string: 'replace'}]}]})",
             metadata: { error: "missing_operations" }
           }),
@@ -430,33 +429,128 @@ async function handleOpenCodeTools(
       }
 
       try {
-        const result = handleUnifiedDiffCommand({ operations, workdir });
+        // Capture before content for diff display
+        const beforeContent: Record<string, string> = {};
+        for (const operation of operations) {
+          const resolvedPath = workdir ? path.resolve(workdir, operation.filePath) : operation.filePath;
+          try {
+            beforeContent[operation.filePath] = fsSync.readFileSync(resolvedPath, 'utf8');
+          } catch {
+            beforeContent[operation.filePath] = '';
+          }
+        }
+        
+        // Process operations with improved error handling
+        const results: Array<string> = [];
+        const errors: Array<string> = [];
+        
+        for (const operation of operations) {
+          try {
+            // Convert each operation to SEARCH/REPLACE format individually
+            for (const edit of operation.edits || []) {
+              const diffContent = `------- SEARCH\n${edit.old_string}\n=======\n${edit.new_string}\n+++++++ REPLACE`;
+              const result = applySearchReplaceDiff(operation.filePath, diffContent, workdir);
+              results.push(`${operation.filePath}: ${result}`);
+            }
+          } catch (error) {
+            const errorMessage = error instanceof Error ? error.message : String(error);
+            
+            // Try fuzzy matching for better error messages
+            try {
+              const resolvedPath = workdir ? path.resolve(workdir, operation.filePath) : operation.filePath;
+              const fileContent = fsSync.readFileSync(resolvedPath, 'utf8');
+              
+              for (const edit of operation.edits || []) {
+                const fuzzyResult = findFuzzyMatch(fileContent, edit.old_string);
+                if (!fuzzyResult.found && fuzzyResult.suggestion) {
+                  errors.push(`${operation.filePath}: ${errorMessage}\n   Suggestion: ${fuzzyResult.suggestion}`);
+                } else {
+                  errors.push(`${operation.filePath}: ${errorMessage}`);
+                }
+              }
+            } catch {
+              errors.push(`${operation.filePath}: ${errorMessage}`);
+            }
+          }
+        }
+        
+        // If there are errors, provide detailed feedback
+        if (errors.length > 0) {
+          const combinedResults = [
+            ...results,
+            "",
+            "ERRORS:",
+            ...errors,
+            "",
+            "TROUBLESHOOTING:",
+            "1. Use read() to get exact text content",
+            "2. Copy text exactly including whitespace/indentation", 
+            "3. For multiple matches, try more specific search text",
+            "4. Consider individual edit() calls for problematic files"
+          ].join('\n');
+          
+          return {
+            outputText: JSON.stringify({
+              output: combinedResults,
+              metadata: { 
+                operation: "multi_edit",
+                partial_success: results.length > 0,
+                errors: errors.length,
+                completed: results.length
+              }
+            }),
+            metadata: { 
+              operation: "multi_edit",
+              partial_success: results.length > 0,
+              errors: errors.length
+            }
+          };
+        }
+        
+        // Generate diff display for successful operations
+        const diffs: Array<string> = [];
+        for (const operation of operations) {
+          const resolvedPath = workdir ? path.resolve(workdir, operation.filePath) : operation.filePath;
+          try {
+            const afterContent = fsSync.readFileSync(resolvedPath, 'utf8');
+            const diff = generateSimpleDiff(beforeContent[operation.filePath] || '', afterContent, operation.filePath);
+            if (diff) {
+              diffs.push(diff);
+            }
+          } catch {
+            // File might not exist after operation
+          }
+        }
         
         // Count total edits applied
         const totalEdits = operations.reduce((sum: number, op: { edits?: Array<unknown> }) => sum + (op.edits?.length || 0), 0);
         const filesModified = operations.length;
         
+        const output = diffs.length > 0 ? diffs.join('\n\n') : results.join('\n');
+        
         return {
           outputText: JSON.stringify({
-            output: result,
+            output: output,
             metadata: { 
               operation: "multi_edit",
               files_modified: filesModified,
               total_edits: totalEdits,
-              atomic: true
+              atomic: true,
+              show_diff: true
             }
           }),
           metadata: { 
             operation: "multi_edit", 
             files_modified: filesModified,
-            total_edits: totalEdits 
+            total_edits: totalEdits,
+            show_diff: true
           }
         };
       } catch (error) {
         const errorMessage = error instanceof Error ? error.message : String(error);
         return {
           outputText: JSON.stringify({
-            output: `Error: ${errorMessage}\n\nGuidance:\n- Use exact literal text from read() output\n- Ensure all files exist before editing\n- For multiple matches, use replace_all: true\n- Check file permissions`,
+            output: `Error: ${errorMessage}\n\nGuidance:\n- Use exact literal text from read() output\n- Ensure all files exist before editing\n- For complex edits, consider individual edit() calls\n- Check file permissions`,
             metadata: { error: "multi_edit_failed" }
           }),
           metadata: { error: "multi_edit_failed" }
@@ -728,12 +822,12 @@ async function handleOpenCodeTools(
       }
 
       const todos = todoStorage[sessionId];
-      const activeTodos = todos.filter(t => t.status !== "completed");
+          const activeTodos = todos.filter(t => t.status !== "completed");
 
-      return {
-        outputText: JSON.stringify({
+          return {
+            outputText: JSON.stringify({
           output: JSON.stringify(todos, null, 2),
-          metadata: { 
+              metadata: { 
             todos,
             title: `${activeTodos.length} todos`,
             operation: "todoread"
@@ -752,8 +846,8 @@ async function handleOpenCodeTools(
       const { todos } = args;
       
       if (!Array.isArray(todos)) {
-        return {
-          outputText: JSON.stringify({
+          return {
+            outputText: JSON.stringify({
             output: "Error: todos must be an array",
             metadata: { error: "invalid_parameter" }
           }),
@@ -787,13 +881,13 @@ async function handleOpenCodeTools(
       }
 
       // Update the todos for this session
-      todoStorage[sessionId] = todos;
-      
+          todoStorage[sessionId] = todos;
+          
       try {
         await fs.writeFile(todoFile, JSON.stringify(todoStorage, null, 2));
       } catch (error) {
-        return {
-          outputText: JSON.stringify({
+          return {
+            outputText: JSON.stringify({
             output: `Error writing todos: ${error}`,
             metadata: { error: "write_failed" }
           }),
@@ -803,8 +897,8 @@ async function handleOpenCodeTools(
 
       const activeTodos = todos.filter((t: TodoItem) => t.status !== "completed");
 
-      return {
-        outputText: JSON.stringify({
+          return {
+            outputText: JSON.stringify({
           output: JSON.stringify(todos, null, 2),
           metadata: { 
             todos,
@@ -1161,7 +1255,7 @@ async function askUserPermission(
     command: Array<string>,
   ) => Promise<CommandConfirmation>,
 ): Promise<HandleExecCommandResult | null> {
-  const { review: decision, customDenyMessage } = await getCommandConfirmation(
+  const { review: decision, customDenyMessage, runInBackground } = await getCommandConfirmation(
     args.cmd,
   );
 
@@ -1175,6 +1269,11 @@ async function askUserPermission(
   // but with a flag to indicate that an explanation was requested
   if (decision === ReviewDecision.EXPLAIN) {
     return null;
+  }
+
+  // If approved and runInBackground is true, update execInput
+  if ((decision === ReviewDecision.YES || decision === ReviewDecision.ALWAYS) && runInBackground) {
+    args.runInBackground = true;
   }
 
   // Any decision other than an affirmative (YES / ALWAYS) or EXPLAIN aborts execution.
@@ -1269,6 +1368,88 @@ export async function handleExecCommandWithRecovery(
 }
 
 // ---------------------------------------------------------------------------
+// Simple diff generation for showing code changes
+// ---------------------------------------------------------------------------
+function generateSimpleDiff(beforeContent: string, afterContent: string, filePath: string): string {
+  if (beforeContent === afterContent) {
+    return '';
+  }
+  
+  const beforeLines = beforeContent.split('\n');
+  const afterLines = afterContent.split('\n');
+  
+  const diffLines: Array<string> = [`--- ${filePath}`];
+  
+  // Simple line-by-line diff
+  const maxLines = Math.max(beforeLines.length, afterLines.length);
+  let hasChanges = false;
+  
+  for (let i = 0; i < maxLines; i++) {
+    const beforeLine = beforeLines[i];
+    const afterLine = afterLines[i];
+    
+    if (beforeLine !== afterLine) {
+      hasChanges = true;
+      if (beforeLine !== undefined) {
+        diffLines.push(`-${beforeLine}`);
+      }
+      if (afterLine !== undefined) {
+        diffLines.push(`+${afterLine}`);
+      }
+    }
+  }
+  
+  return hasChanges ? diffLines.join('\n') : '';
+}
+
+// ---------------------------------------------------------------------------
+// Fuzzy text matching for multi_edit operations
+// ---------------------------------------------------------------------------
+function findFuzzyMatch(content: string, searchText: string): { found: boolean; suggestion?: string } {
+  // Try exact match first
+  if (content.includes(searchText)) {
+    return { found: true };
+  }
+  
+  // Normalize whitespace for comparison
+  const normalizeWhitespace = (text: string) => text.replace(/\s+/g, ' ').trim();
+  const normalizedSearch = normalizeWhitespace(searchText);
+  const normalizedContent = normalizeWhitespace(content);
+  
+  if (normalizedContent.includes(normalizedSearch)) {
+    return { found: true, suggestion: "Try normalizing whitespace in search text" };
+  }
+  
+  // Try line-by-line fuzzy matching
+  const searchLines = searchText.split('\n').map(line => line.trim()).filter(line => line);
+  const contentLines = content.split('\n');
+  
+  // Look for a sequence of lines that match (ignoring leading/trailing whitespace)
+  for (let i = 0; i < contentLines.length - searchLines.length + 1; i++) {
+    let allMatch = true;
+    for (let j = 0; j < searchLines.length; j++) {
+      const contentLine = contentLines[i + j]?.trim() || '';
+      const searchLine = searchLines[j]?.trim() || '';
+      if (contentLine !== searchLine) {
+        allMatch = false;
+        break;
+      }
+    }
+    if (allMatch) {
+      // Found fuzzy match - extract the actual text
+      const actualLines = contentLines.slice(i, i + searchLines.length);
+      const actualText = actualLines.join('\n');
+      return { 
+        found: true, 
+        suggestion: `Use this exact text instead:\n${actualText}` 
+      };
+    }
+  }
+  
+  return { found: false, suggestion: "Text not found. Use read() to check exact content." };
+}
+
+// ---------------------------------------------------------------------------
 // Command repetition detection
 // ---------------------------------------------------------------------------
 const recentCommands: Array<{ command: string; timestamp: number }> = [];
@@ -1297,7 +1478,7 @@ function detectCommandRepetition(cmd: Array<string>): string | null {
   const repetitionCount = recentCommands.filter(entry => entry.command === commandStr).length;
   
   if (repetitionCount >= COMMAND_REPEAT_THRESHOLD) {
-    return `🔄 **Command Repetition Detected!**
+    return `**Command Repetition Detected!**
 
 The same command has been attempted ${repetitionCount} times in the last minute:
 \`${cmd.join(" ")}\`

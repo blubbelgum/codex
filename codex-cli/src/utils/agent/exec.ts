@@ -8,6 +8,7 @@ import { execWithLandlock } from "./sandbox/landlock.js";
 import { execWithSeatbelt } from "./sandbox/macos-seatbelt.js";
 import { rawExec } from "./sandbox/raw-exec.js";
 import { formatCommandForDisplay } from "../../format-command.js";
+import { log } from "../logger/log.js";
 import os from "os";
 import { parse } from "shell-quote";
 
@@ -43,7 +44,26 @@ export async function exec(
     timeout: execInput.timeoutInMillis || DEFAULT_TIMEOUT_MS,
     ...(requiresShell(execInput.cmd) ? { shell: true } : {}),
     ...(execInput.workdir ? { cwd: execInput.workdir } : {}),
+    ...(execInput.runInBackground ? { detached: true, stdio: 'ignore' } : {}),
   };
+
+  // If running in background, start the process and return immediately
+  if (execInput.runInBackground) {
+    switch (sandboxType) {
+      case SandboxType.NONE: {
+        return rawExecBackground(execInput.cmd, opts, config);
+      }
+      case SandboxType.MACOS_SEATBELT:
+      case SandboxType.LINUX_LANDLOCK: {
+        // Background execution not supported with sandboxing
+        return Promise.resolve({
+          stdout: "Background execution is not supported with sandboxing enabled",
+          stderr: "",
+          exitCode: 1,
+        });
+      }
+    }
+  }
 
   switch (sandboxType) {
     case SandboxType.NONE: {
@@ -68,6 +88,61 @@ export async function exec(
         abortSignal,
       );
     }
+  }
+}
+
+async function rawExecBackground(
+  cmd: Array<string>,
+  opts: SpawnOptions,
+  _config: AppConfig,
+): Promise<ExecResult> {
+  const { spawn } = await import("child_process");
+  const adaptedCommand = await import("./platform-commands.js").then(m => m.adaptCommandForPlatform(cmd));
+  
+  const prog = adaptedCommand[0];
+  if (typeof prog !== "string") {
+    return {
+      stdout: "",
+      stderr: "command[0] is not a string",
+      exitCode: 1,
+    };
+  }
+
+  try {
+    // Improved background process spawning
+    const child = spawn(prog, adaptedCommand.slice(1), {
+      ...opts,
+      detached: true,
+      stdio: ['ignore', 'ignore', 'ignore'], // Explicitly ignore all stdio
+      windowsHide: true, // Hide window on Windows
+    });
+    
+    // Unref the child process to allow parent to exit without waiting
+    child.unref();
+    
+    const pid = child.pid;
+    
+    // Handle process errors
+    child.on('error', (error) => {
+      log(`Background process ${pid} error: ${error}`);
+    });
+    
+    // Optional: Log when process exits (for debugging)
+    child.on('exit', (code) => {
+      log(`Background process ${pid} exited with code: ${code}`);
+    });
+    
+    return {
+      stdout: `Started background process with PID: ${pid}\nCommand: ${cmd.join(" ")}`,
+      stderr: "",
+      exitCode: 0,
+    };
+  } catch (error) {
+    return {
+      stdout: "",
+      stderr: `Failed to start background process: ${error}`,
+      exitCode: 1,
+    };
   }
 }
 

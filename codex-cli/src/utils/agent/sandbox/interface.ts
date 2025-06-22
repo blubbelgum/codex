@@ -9,6 +9,7 @@ export interface ExecInput {
   workdir?: string;
   timeoutInMillis?: number;
   additionalWritableRoots?: Array<string>;
+  runInBackground?: boolean;
 }
 
 /**
