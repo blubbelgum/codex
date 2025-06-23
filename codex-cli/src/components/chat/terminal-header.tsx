@@ -37,6 +37,7 @@ export interface TerminalHeaderProps {
   flexModeEnabled?: boolean;
   showTabInfo?: boolean;
   backgroundProcesses?: Array<{ pid: string; command: string }>;
+  neovimConnected?: boolean;
 }
 
 const TerminalHeader: React.FC<TerminalHeaderProps> = ({
@@ -52,6 +53,7 @@ const TerminalHeader: React.FC<TerminalHeaderProps> = ({
   flexModeEnabled = false,
   showTabInfo = false,
   backgroundProcesses = [],
+  neovimConnected = false,
 }) => {
   return (
     <Box justifyContent="center" width="100%">
@@ -134,6 +136,12 @@ const TerminalHeader: React.FC<TerminalHeaderProps> = ({
                 <Text bold color="cyan">[1] Chat</Text>{" "}
                 <Text bold color="yellow">[2] Files</Text>{" "}
                 <Text bold color="gray">[3] Reserved</Text>
+              </Text>
+            )}
+            {neovimConnected && (
+              <Text dimColor>
+                <Text color="blueBright">↳</Text> neovim:{" "}
+                <Text bold color="green">[●] Connected</Text>
               </Text>
             )}
             {backgroundProcesses.length > 0 && (

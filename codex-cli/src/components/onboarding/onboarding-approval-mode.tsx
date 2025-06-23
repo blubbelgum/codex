@@ -26,7 +26,7 @@ export function OnboardingApprovalMode(): React.ReactElement {
   };
 
   // Handle keyboard navigation - must be before any conditional returns
-  useInput((input, key) => {
+  useInput((_input, key) => {
     if (key.return) {
       handleNext();
     } else if (key.leftArrow && currentStep > 0) {

@@ -15,6 +15,7 @@ import { getFileSystemSuggestions } from "../../utils/file-system-suggestions.js
 import { expandFileTags } from "../../utils/file-tag-utils";
 import { createInputItem } from "../../utils/input-utils.js";
 import { log } from "../../utils/logger/log.js";
+import { getNeovimConnectionStatus, formatNeovimStatus } from "../../utils/neovim-status.js";
 import { setSessionId } from "../../utils/session.js";
 import { SLASH_COMMANDS, type SlashCommand } from "../../utils/slash-commands";
 import {
@@ -119,6 +120,9 @@ export default function TerminalChatInput({
   // Track the caret row across keystrokes
   const prevCursorRow = useRef<number | null>(null);
   const prevCursorWasAtLastRow = useRef<boolean>(false);
+  
+  // Track Neovim connection status
+  const [neovimStatus, setNeovimStatus] = useState({ connected: false });
 
   // --- Helper for updating input, remounting editor, and moving cursor to end ---
   const applyFsSuggestion = useCallback((newInputText: string) => {
@@ -228,6 +232,23 @@ export default function TerminalChatInput({
 
     loadHistory();
   }, []);
+  
+  // Check Neovim connection status periodically
+  useEffect(() => {
+    async function checkNeovimStatus() {
+      const status = await getNeovimConnectionStatus();
+      setNeovimStatus(status);
+    }
+    
+    // Check immediately
+    checkNeovimStatus();
+    
+    // Check every 2 seconds
+    const interval = setInterval(checkNeovimStatus, 2000);
+    
+    return () => clearInterval(interval);
+  }, []);
+
   // Reset slash suggestion index when input prefix changes
   useEffect(() => {
     if (input.trim().startsWith("/")) {
@@ -264,9 +285,44 @@ export default function TerminalChatInput({
       // Slash command navigation: up/down to select, enter to fill
       if (!confirmationPrompt && !loading && input.trim().startsWith("/")) {
         const prefix = input.trim();
-        const matches = SLASH_COMMANDS.filter((cmd: SlashCommand) =>
-          cmd.command.startsWith(prefix),
-        );
+        
+        // Improved command matching with fuzzy search
+        const matches = SLASH_COMMANDS.filter((cmd: SlashCommand) => {
+          // Exact prefix match (highest priority)
+          if (cmd.command.startsWith(prefix)) {
+            return true;
+          }
+          
+          // Fuzzy match: check if all characters in prefix exist in order in command
+          if (prefix.length > 1) {
+            const cmdNoSlash = cmd.command.slice(1); // Remove leading slash
+            const prefixNoSlash = prefix.slice(1); // Remove leading slash
+            
+            let prefixIndex = 0;
+            for (let i = 0; i < cmdNoSlash.length && prefixIndex < prefixNoSlash.length; i++) {
+              if (cmdNoSlash[i] === prefixNoSlash[prefixIndex]) {
+                prefixIndex++;
+              }
+            }
+            return prefixIndex === prefixNoSlash.length;
+          }
+          
+          return false;
+        }).sort((a, b) => {
+          // Sort by exact matches first, then by command length (shorter first)
+          const aExact = a.command.startsWith(prefix);
+          const bExact = b.command.startsWith(prefix);
+          
+          if (aExact && !bExact) {
+            return -1;
+          }
+          if (!aExact && bExact) {
+            return 1;
+          }
+          
+          return a.command.length - b.command.length;
+        });
+        
         if (matches.length > 0) {
           if (_key.tab) {
             // Cycle and fill slash command suggestions on Tab
@@ -349,6 +405,15 @@ export default function TerminalChatInput({
                     onSubmit(cmd);
                     break;
                   case "/task":
+                    onSubmit(cmd);
+                    break;
+                  case "/connect":
+                    onSubmit(cmd);
+                    break;
+                  case "/disconnect":
+                    onSubmit(cmd);
+                    break;
+                  case "/nvim-status":
                     onSubmit(cmd);
                     break;
                   case "/planact":
@@ -840,7 +905,124 @@ export default function TerminalChatInput({
          }
         
         return;
-
+      } else if (inputValue === "/connect" || inputValue.startsWith("/connect ")) {
+        // Handle Neovim connection command locally
+        setInput("");
+        
+        try {
+          const { handleNeovimConnectionCommand } = await import("../../utils/agent/handle-exec-command.js");
+          const parts = inputValue.trim().split(/\s+/);
+          const result = await handleNeovimConnectionCommand(parts);
+          
+          setItems((prev) => [
+            ...prev,
+            {
+              id: `nvim-connect-${Date.now()}`,
+              type: "message",
+              role: "system",
+              content: [
+                {
+                  type: "input_text",
+                  text: result,
+                },
+              ],
+            },
+          ]);
+        } catch (error) {
+          setItems((prev) => [
+            ...prev,
+            {
+              id: `nvim-connect-error-${Date.now()}`,
+              type: "message",
+              role: "system",
+              content: [
+                {
+                  type: "input_text",
+                  text: `Failed to connect to Neovim: ${error instanceof Error ? error.message : String(error)}`,
+                },
+              ],
+            },
+          ]);
+        }
+        return;
+      } else if (inputValue === "/disconnect") {
+        // Handle Neovim disconnection command locally
+        setInput("");
+        
+        try {
+          const { handleNeovimConnectionCommand } = await import("../../utils/agent/handle-exec-command.js");
+          const result = await handleNeovimConnectionCommand(["/disconnect"]);
+          
+          setItems((prev) => [
+            ...prev,
+            {
+              id: `nvim-disconnect-${Date.now()}`,
+              type: "message",
+              role: "system",
+              content: [
+                {
+                  type: "input_text",
+                  text: result,
+                },
+              ],
+            },
+          ]);
+        } catch (error) {
+          setItems((prev) => [
+            ...prev,
+            {
+              id: `nvim-disconnect-error-${Date.now()}`,
+              type: "message",
+              role: "system",
+              content: [
+                {
+                  type: "input_text",
+                  text: `Failed to disconnect from Neovim: ${error instanceof Error ? error.message : String(error)}`,
+                },
+              ],
+            },
+          ]);
+        }
+        return;
+      } else if (inputValue === "/nvim-status") {
+        // Handle Neovim status command locally
+        setInput("");
+        
+        try {
+          const { handleNeovimConnectionCommand } = await import("../../utils/agent/handle-exec-command.js");
+          const result = await handleNeovimConnectionCommand(["/nvim-status"]);
+          
+          setItems((prev) => [
+            ...prev,
+            {
+              id: `nvim-status-${Date.now()}`,
+              type: "message",
+              role: "system",
+              content: [
+                {
+                  type: "input_text",
+                  text: result,
+                },
+              ],
+            },
+          ]);
+        } catch (error) {
+          setItems((prev) => [
+            ...prev,
+            {
+              id: `nvim-status-error-${Date.now()}`,
+              type: "message",
+              role: "system",
+              content: [
+                {
+                  type: "input_text",
+                  text: `Failed to get Neovim status: ${error instanceof Error ? error.message : String(error)}`,
+                },
+              ],
+            },
+          ]);
+        }
+        return;
       } else if (inputValue.startsWith("/")) {
         // Handle invalid/unrecognized commands. Only single-word inputs starting with '/'
         // (e.g., /command) that are not recognized are caught here. Any other input, including
@@ -848,7 +1030,7 @@ export default function TerminalChatInput({
         // and be treated as a regular prompt.
         const trimmed = inputValue.trim();
 
-        if (/^\/\S+$/.test(trimmed) && trimmed !== "/search" && trimmed !== "/task") {
+        if (/^\/\S+$/.test(trimmed) && trimmed !== "/search" && trimmed !== "/task" && trimmed !== "/connect" && trimmed !== "/disconnect" && trimmed !== "/nvim-status") {
           setInput("");
           setItems((prev) => [
             ...prev,
@@ -1101,6 +1283,13 @@ export default function TerminalChatInput({
             <Box gap={1}>
               <Text color="magenta">
                 Background: <Text bold>{backgroundProcesses && backgroundProcesses.length > 0 ? '[●]' : '[○]'} {backgroundProcesses?.length || 0} process{(backgroundProcesses?.length || 0) !== 1 ? 'es' : ''} running</Text>
+              </Text>
+            </Box>
+            {/* Neovim connection status */}
+            <Box gap={1}>
+              <Text color={neovimStatus.connected ? "green" : "gray"}>
+                <Text bold>{neovimStatus.connected ? '[●]' : '[○]'} </Text>
+                {formatNeovimStatus(neovimStatus)}
               </Text>
             </Box>
           </Box>

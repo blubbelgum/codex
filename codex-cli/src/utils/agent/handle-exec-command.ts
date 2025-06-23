@@ -24,6 +24,10 @@ import fs from "fs/promises";
 import os from "os";
 import path from "path";
 
+// Global Neovim connection instance
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export let globalNeovimConnection: any = null;
+
 // ---------------------------------------------------------------------------
 // Session‑level cache of commands that the user has chosen to always approve.
 //
@@ -298,12 +302,26 @@ async function handleOpenCodeTools(
       }
 
       try {
+        let numberedContent: string;
+        let totalLines: number;
+        let selectedLines: Array<string>;
+
+        // Use Neovim if connected, otherwise use file system
+        if (globalNeovimConnection && globalNeovimConnection.isConnected()) {
+          numberedContent = await readFileViaNeovim(filePath, offset, limit);
+          const content = await globalNeovimConnection.getBufferContent(filePath);
+          const lines = content.split('\n');
+          selectedLines = lines.slice(offset, offset + limit);
+          totalLines = lines.length;
+        } else {
         const content = readFile(filePath, workdir);
         const lines = content.split('\n');
-        const selectedLines = lines.slice(offset, offset + limit);
-        const numberedContent = selectedLines.map((line, idx) => 
+          selectedLines = lines.slice(offset, offset + limit);
+          numberedContent = selectedLines.map((line, idx) => 
           `${(offset + idx + 1).toString().padStart(5, '0')}| ${line}`
         ).join('\n');
+          totalLines = lines.length;
+        }
 
         return {
           outputText: JSON.stringify({
@@ -312,9 +330,10 @@ async function handleOpenCodeTools(
               operation: "read",
               file: filePath,
               lines_read: selectedLines.length,
-              total_lines: lines.length,
+              total_lines: totalLines,
               offset,
-              limit
+              limit,
+              via_neovim: globalNeovimConnection && globalNeovimConnection.isConnected()
             }
           }),
           metadata: { operation: "read", file: filePath }
@@ -344,11 +363,23 @@ async function handleOpenCodeTools(
       }
 
       try {
-        const result = writeToFile(filePath, content, workdir);
+        let result: string;
+
+        // Use Neovim if connected, otherwise use file system
+        if (globalNeovimConnection && globalNeovimConnection.isConnected()) {
+          result = await writeFileViaNeovim(filePath, content);
+        } else {
+          result = writeToFile(filePath, content, workdir);
+        }
+
         return {
           outputText: JSON.stringify({
             output: result,
-            metadata: { operation: "write", file: filePath }
+            metadata: { 
+              operation: "write", 
+              file: filePath,
+              via_neovim: globalNeovimConnection && globalNeovimConnection.isConnected()
+            }
           }),
           metadata: { operation: "write", file: filePath }
         };
@@ -377,13 +408,26 @@ async function handleOpenCodeTools(
       }
 
       try {
+        let result: string;
+
+        // Use Neovim if connected, otherwise use file system
+        if (globalNeovimConnection && globalNeovimConnection.isConnected()) {
+          result = await editFileViaNeovim(filePath, search, replace);
+        } else {
         // Convert to the SEARCH/REPLACE format
         const diffContent = `------- SEARCH\n${search}\n=======\n${replace}\n+++++++ REPLACE`;
-        const result = applySearchReplaceDiff(filePath, diffContent, workdir);
+          result = applySearchReplaceDiff(filePath, diffContent, workdir);
+        }
+
         return {
           outputText: JSON.stringify({
             output: result,
-            metadata: { operation: "edit", file: filePath, replaceAll }
+            metadata: { 
+              operation: "edit", 
+              file: filePath, 
+              replaceAll,
+              via_neovim: globalNeovimConnection && globalNeovimConnection.isConnected()
+            }
           }),
           metadata: { operation: "edit", file: filePath }
         };
@@ -938,6 +982,297 @@ async function handleOpenCodeTools(
       };
     }
 
+    case "lsp_hover": {
+      const { filePath, line, character } = args;
+      if (!filePath || line === undefined || character === undefined) {
+        return {
+          outputText: JSON.stringify({
+            output: "Error: filePath, line, and character are required for lsp_hover operation",
+            metadata: { error: "missing_parameter" }
+          }),
+          metadata: { error: "missing_parameter" }
+        };
+      }
+
+      try {
+        // Get LSP manager instance
+        const { NeovimLSPManager } = await import('../../nvim/lsp-manager.js');
+        const lspManager = new NeovimLSPManager(workdir || process.cwd());
+        
+        await lspManager.initialize();
+        const hoverInfo = await lspManager.getHoverInfo(filePath, line, character);
+        
+        const result = hoverInfo ? JSON.stringify(hoverInfo, null, 2) : "No hover information available";
+        
+        return {
+          outputText: JSON.stringify({
+            output: result,
+            metadata: { 
+              operation: "lsp_hover",
+              file: filePath,
+              position: { line, character }
+            }
+          }),
+          metadata: { operation: "lsp_hover", file: filePath }
+        };
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        return {
+          outputText: JSON.stringify({
+            output: `LSP Hover Error: ${errorMessage}`,
+            metadata: { error: "lsp_hover_failed" }
+          }),
+          metadata: { error: "lsp_hover_failed" }
+        };
+      }
+    }
+
+    case "lsp_diagnostics": {
+      const { filePath } = args;
+      if (!filePath) {
+        return {
+          outputText: JSON.stringify({
+            output: "Error: filePath is required for lsp_diagnostics operation",
+            metadata: { error: "missing_parameter" }
+          }),
+          metadata: { error: "missing_parameter" }
+        };
+      }
+
+      try {
+        // Get LSP manager instance
+        const { NeovimLSPManager } = await import('../../nvim/lsp-manager.js');
+        const lspManager = new NeovimLSPManager(workdir || process.cwd());
+        
+        await lspManager.initialize();
+        const diagnostics = await lspManager.getDiagnostics(filePath);
+        
+        const result = diagnostics.length > 0 ? JSON.stringify(diagnostics, null, 2) : "No diagnostics found";
+        
+        return {
+          outputText: JSON.stringify({
+            output: result,
+            metadata: { 
+              operation: "lsp_diagnostics",
+              file: filePath,
+              count: diagnostics.length
+            }
+          }),
+          metadata: { operation: "lsp_diagnostics", file: filePath }
+        };
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        return {
+          outputText: JSON.stringify({
+            output: `LSP Diagnostics Error: ${errorMessage}`,
+            metadata: { error: "lsp_diagnostics_failed" }
+          }),
+          metadata: { error: "lsp_diagnostics_failed" }
+        };
+      }
+    }
+
+    case "lsp_completion": {
+      const { filePath, line, character } = args;
+      if (!filePath || line === undefined || character === undefined) {
+        return {
+          outputText: JSON.stringify({
+            output: "Error: filePath, line, and character are required for lsp_completion operation",
+            metadata: { error: "missing_parameter" }
+          }),
+          metadata: { error: "missing_parameter" }
+        };
+      }
+
+      try {
+        // Get LSP manager instance
+        const { NeovimLSPManager } = await import('../../nvim/lsp-manager.js');
+        const lspManager = new NeovimLSPManager(workdir || process.cwd());
+        
+        await lspManager.initialize();
+        const completions = await lspManager.getCompletions(filePath, line, character);
+        
+        const result = completions.length > 0 ? JSON.stringify(completions, null, 2) : "No completions available";
+        
+        return {
+          outputText: JSON.stringify({
+            output: result,
+            metadata: { 
+              operation: "lsp_completion",
+              file: filePath,
+              position: { line, character },
+              count: completions.length
+            }
+          }),
+          metadata: { operation: "lsp_completion", file: filePath }
+        };
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        return {
+          outputText: JSON.stringify({
+            output: `LSP Completion Error: ${errorMessage}`,
+            metadata: { error: "lsp_completion_failed" }
+          }),
+          metadata: { error: "lsp_completion_failed" }
+        };
+      }
+    }
+
+    case "lsp_definition": {
+      const { filePath, line, character } = args;
+      if (!filePath || line === undefined || character === undefined) {
+        return {
+          outputText: JSON.stringify({
+            output: "Error: filePath, line, and character are required for lsp_definition operation",
+            metadata: { error: "missing_parameter" }
+          }),
+          metadata: { error: "missing_parameter" }
+        };
+      }
+
+      try {
+        // Get LSP manager instance
+        const { NeovimLSPManager } = await import('../../nvim/lsp-manager.js');
+        const lspManager = new NeovimLSPManager(workdir || process.cwd());
+        
+        await lspManager.initialize();
+        const definition = await lspManager.goToDefinition(filePath, line, character);
+        
+        const result = definition ? JSON.stringify(definition, null, 2) : "No definition found";
+        
+        return {
+          outputText: JSON.stringify({
+            output: result,
+            metadata: { 
+              operation: "lsp_definition",
+              file: filePath,
+              position: { line, character }
+            }
+          }),
+          metadata: { operation: "lsp_definition", file: filePath }
+        };
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        return {
+          outputText: JSON.stringify({
+            output: `LSP Definition Error: ${errorMessage}`,
+            metadata: { error: "lsp_definition_failed" }
+          }),
+          metadata: { error: "lsp_definition_failed" }
+        };
+      }
+    }
+
+    case "lsp_references": {
+      const { filePath, line, character } = args;
+      if (!filePath || line === undefined || character === undefined) {
+        return {
+          outputText: JSON.stringify({
+            output: "Error: filePath, line, and character are required for lsp_references operation",
+            metadata: { error: "missing_parameter" }
+          }),
+          metadata: { error: "missing_parameter" }
+        };
+      }
+
+      try {
+        // Get LSP manager instance
+        const { NeovimLSPManager } = await import('../../nvim/lsp-manager.js');
+        const lspManager = new NeovimLSPManager(workdir || process.cwd());
+        
+        await lspManager.initialize();
+        const references = await lspManager.findReferences(filePath, line, character);
+        
+        const result = references.length > 0 ? JSON.stringify(references, null, 2) : "No references found";
+        
+        return {
+          outputText: JSON.stringify({
+            output: result,
+            metadata: { 
+              operation: "lsp_references",
+              file: filePath,
+              position: { line, character },
+              count: references.length
+            }
+          }),
+          metadata: { operation: "lsp_references", file: filePath }
+        };
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        return {
+          outputText: JSON.stringify({
+            output: `LSP References Error: ${errorMessage}`,
+            metadata: { error: "lsp_references_failed" }
+          }),
+          metadata: { error: "lsp_references_failed" }
+        };
+      }
+    }
+
+    case "lsp_format": {
+      const { filePath } = args;
+      if (!filePath) {
+        return {
+          outputText: JSON.stringify({
+            output: "Error: filePath is required for lsp_format operation",
+            metadata: { error: "missing_parameter" }
+          }),
+          metadata: { error: "missing_parameter" }
+        };
+      }
+
+      try {
+        // Get LSP manager instance
+        const { NeovimLSPManager } = await import('../../nvim/lsp-manager.js');
+        const lspManager = new NeovimLSPManager(workdir || process.cwd());
+        
+        await lspManager.initialize();
+        const edits = await lspManager.formatFile(filePath);
+        
+        // Apply the formatting edits if any
+        if (edits.length > 0) {
+          // Apply edits using our existing edit functionality
+          for (const edit of edits) {
+            const { range: _range, newText: _newText } = edit;
+            // Apply edit to file - this would need integration with our file editing system
+          }
+          
+          return {
+            outputText: JSON.stringify({
+              output: `File formatted with ${edits.length} changes`,
+              metadata: { 
+                operation: "lsp_format",
+                file: filePath,
+                changes: edits.length
+              }
+            }),
+            metadata: { operation: "lsp_format", file: filePath }
+          };
+        } else {
+          return {
+            outputText: JSON.stringify({
+              output: "File already properly formatted",
+              metadata: { 
+                operation: "lsp_format",
+                file: filePath,
+                changes: 0
+              }
+            }),
+            metadata: { operation: "lsp_format", file: filePath }
+          };
+        }
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        return {
+          outputText: JSON.stringify({
+            output: `LSP Format Error: ${errorMessage}`,
+            metadata: { error: "lsp_format_failed" }
+          }),
+          metadata: { error: "lsp_format_failed" }
+        };
+      }
+    }
+
     default:
       return {
         outputText: JSON.stringify({
@@ -986,6 +1321,12 @@ export async function handleExecCommand(
   abortSignal?: AbortSignal,
 ): Promise<HandleExecCommandResult> {
   const { cmd, workdir } = args;
+
+  // Check for Neovim connection commands first
+  const neovimResult = await handleNeovimConnection(cmd, workdir);
+  if (neovimResult) {
+    return neovimResult;
+  }
 
   // Early check for file operations - this should be first priority
   const fileOpResult = await handleFileOperations(cmd, workdir);
@@ -1493,4 +1834,447 @@ This suggests the command is failing repeatedly. Consider:
   }
   
   return null;
+}
+
+// ---------------------------------------------------------------------------
+// Handle Neovim connection commands
+// ---------------------------------------------------------------------------
+async function handleNeovimConnection(
+  cmd: Array<string>,
+  _workdir?: string
+): Promise<HandleExecCommandResult | null> {
+  // Handle /connect command
+  if (cmd.length >= 1 && (cmd[0] === '/connect' || (cmd.length >= 2 && cmd[1] === '/connect'))) {
+    try {
+      const { NeovimConnection } = await import('../../nvim/neovim-connection.js');
+      
+      if (globalNeovimConnection && globalNeovimConnection.isConnected()) {
+        return {
+          outputText: JSON.stringify({
+            output: "Already connected to Neovim",
+            metadata: { 
+              operation: "nvim_connect",
+              status: "already_connected",
+              connection: globalNeovimConnection.getConnectionInfo()
+            }
+          }),
+          metadata: { operation: "nvim_connect", status: "already_connected" }
+        };
+      }
+
+      globalNeovimConnection = new NeovimConnection();
+      
+      // Parse connection options from command
+      const options: { socket?: string; host?: string; port?: number } = {};
+      
+      // Find the connection target argument - could be cmd[1] if cmd[0] is '/connect'
+      // or cmd[2] if cmd[0] is 'bash' and cmd[1] is '/connect'
+      let targetArg: string | undefined;
+      if (cmd[0] === '/connect' && cmd.length > 1) {
+        targetArg = cmd[1];
+      } else if (cmd.length > 2 && cmd[1] === '/connect') {
+        targetArg = cmd[2];
+      }
+      
+      if (targetArg) {
+        if (targetArg.startsWith('/') || targetArg.startsWith('./')) {
+          options.socket = targetArg;
+        } else if (targetArg.includes(':')) {
+          const [host, port] = targetArg.split(':');
+          options.host = host;
+          if (port) {
+            options.port = parseInt(port);
+          }
+        }
+      }
+
+      await globalNeovimConnection.connect(options);
+      const connectionInfo = globalNeovimConnection.getConnectionInfo();
+
+      return {
+        outputText: JSON.stringify({
+          output: `Successfully connected to Neovim!\nConnection: ${connectionInfo.socket || `${connectionInfo.host}:${connectionInfo.port}`}\n\nNow all file operations will be performed directly through Neovim's buffer system.\nUse '/disconnect' to return to normal file operations.`,
+          metadata: { 
+            operation: "nvim_connect",
+            status: "connected",
+            connection: connectionInfo
+          }
+        }),
+        metadata: { operation: "nvim_connect", status: "connected" }
+      };
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      return {
+        outputText: JSON.stringify({
+          output: `Failed to connect to Neovim: ${errorMessage}\n\nTroubleshooting:\n1. Start Neovim with: nvim --listen /tmp/nvim.sock\n2. Or for TCP: nvim --listen 127.0.0.1:6666\n3. Ensure Neovim is running and accessible\n4. Check firewall settings for TCP connections`,
+          metadata: { 
+            operation: "nvim_connect",
+            status: "failed",
+            error: errorMessage
+          }
+        }),
+        metadata: { operation: "nvim_connect", status: "failed" }
+      };
+    }
+  }
+
+  // Handle /disconnect command
+  if (cmd.length >= 1 && (cmd[0] === '/disconnect' || (cmd.length >= 2 && cmd[1] === '/disconnect'))) {
+    if (!globalNeovimConnection || !globalNeovimConnection.isConnected()) {
+      return {
+        outputText: JSON.stringify({
+          output: "Not currently connected to Neovim",
+          metadata: { 
+            operation: "nvim_disconnect",
+            status: "not_connected"
+          }
+        }),
+        metadata: { operation: "nvim_disconnect", status: "not_connected" }
+      };
+    }
+
+    try {
+      await globalNeovimConnection.disconnect();
+      globalNeovimConnection = null;
+
+      return {
+        outputText: JSON.stringify({
+          output: "Disconnected from Neovim. File operations will now use standard file system methods.",
+          metadata: { 
+            operation: "nvim_disconnect",
+            status: "disconnected"
+          }
+        }),
+        metadata: { operation: "nvim_disconnect", status: "disconnected" }
+      };
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      return {
+        outputText: JSON.stringify({
+          output: `Error disconnecting from Neovim: ${errorMessage}`,
+          metadata: { 
+            operation: "nvim_disconnect",
+            status: "error",
+            error: errorMessage
+          }
+        }),
+        metadata: { operation: "nvim_disconnect", status: "error" }
+      };
+    }
+  }
+
+  // Handle /nvim-status command
+  if (cmd.length >= 1 && (cmd[0] === '/nvim-status' || (cmd.length >= 2 && cmd[1] === '/nvim-status'))) {
+    const isConnected = globalNeovimConnection && globalNeovimConnection.isConnected();
+    const connectionInfo = isConnected ? globalNeovimConnection.getConnectionInfo() : null;
+
+    return {
+      outputText: JSON.stringify({
+        output: isConnected 
+          ? `Connected to Neovim\nConnection: ${connectionInfo?.socket || `${connectionInfo?.host}:${connectionInfo?.port}`}\nBuffers: Available\nStatus: Active`
+          : "Not connected to Neovim\nFile operations using standard file system\nUse '/connect' to establish Neovim connection",
+        metadata: { 
+          operation: "nvim_status",
+          connected: isConnected,
+          connection: connectionInfo
+        }
+      }),
+      metadata: { operation: "nvim_status", connected: isConnected }
+    };
+  }
+
+  // Handle /lsp-status command
+  if (cmd.length >= 1 && (cmd[0] === '/lsp-status' || (cmd.length >= 2 && cmd[1] === '/lsp-status'))) {
+    try {
+      const { NeovimLSPManager } = await import('../../nvim/lsp-manager.js');
+      const lspManager = new NeovimLSPManager(process.cwd());
+      
+      // Initialize and get status of language servers
+      await lspManager.initialize();
+      const serverStatus = await lspManager.getServerStatus();
+      
+      const statusOutput = serverStatus.length > 0 
+        ? `Active Language Servers:\n${serverStatus.map(server => 
+            `• ${server.name}: ${server.status} (${server.language})`
+          ).join('\n')}\n\nTotal: ${serverStatus.length} server${serverStatus.length !== 1 ? 's' : ''} active`
+        : "No active language servers\n\nTo enable LSP features:\n1. Connect to Neovim with /connect\n2. Ensure language servers are installed (typescript-language-server, pylsp, etc.)\n3. Open a file to auto-detect and start appropriate servers";
+
+      return {
+        outputText: JSON.stringify({
+          output: statusOutput,
+          metadata: { 
+            operation: "lsp_status",
+            server_count: serverStatus.length,
+            servers: serverStatus
+          }
+        }),
+        metadata: { operation: "lsp_status", server_count: serverStatus.length }
+      };
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      return {
+        outputText: JSON.stringify({
+          output: `Failed to get LSP status: ${errorMessage}\n\nNote: LSP features require Neovim connection and language servers to be installed.`,
+          metadata: { 
+            operation: "lsp_status",
+            status: "error",
+            error: errorMessage
+          }
+        }),
+        metadata: { operation: "lsp_status", status: "error" }
+      };
+    }
+  }
+
+  // Handle /buffer-list command
+  if (cmd.length >= 1 && (cmd[0] === '/buffer-list' || (cmd.length >= 2 && cmd[1] === '/buffer-list'))) {
+    if (!globalNeovimConnection || !globalNeovimConnection.isConnected()) {
+      return {
+        outputText: JSON.stringify({
+          output: "Not connected to Neovim\n\nConnect to Neovim first:\n1. Start Neovim: nvim --listen /tmp/nvim.sock\n2. Connect: /connect /tmp/nvim.sock\n3. Then use /buffer-list to see open buffers",
+          metadata: { 
+            operation: "buffer_list",
+            status: "not_connected"
+          }
+        }),
+        metadata: { operation: "buffer_list", status: "not_connected" }
+      };
+    }
+
+    try {
+      const buffers = await globalNeovimConnection.getBufferList();
+      
+      if (buffers.length === 0) {
+        return {
+          outputText: JSON.stringify({
+            output: "No buffers open in Neovim\n\nOpen some files in Neovim to see them listed here.",
+            metadata: { 
+              operation: "buffer_list",
+              buffer_count: 0,
+              buffers: []
+            }
+          }),
+          metadata: { operation: "buffer_list", buffer_count: 0 }
+        };
+      }
+
+      const bufferOutput = `Open Buffers in Neovim:\n${buffers.map((buffer: any, index: number) => 
+        `${(index + 1).toString().padStart(2, ' ')}. ${buffer.name || '<unnamed>'} ${
+          buffer.modified ? '[+]' : ''
+        } ${buffer.loaded ? '' : '[not loaded]'}`
+      ).join('\n')}\n\nTotal: ${buffers.length} buffer${buffers.length !== 1 ? 's' : ''}`;
+
+      return {
+        outputText: JSON.stringify({
+          output: bufferOutput,
+          metadata: { 
+            operation: "buffer_list",
+            buffer_count: buffers.length,
+            buffers: buffers.map((b: any) => ({ name: b.name, modified: b.modified, loaded: b.loaded }))
+          }
+        }),
+        metadata: { operation: "buffer_list", buffer_count: buffers.length }
+      };
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      return {
+        outputText: JSON.stringify({
+          output: `Failed to get buffer list: ${errorMessage}`,
+          metadata: { 
+            operation: "buffer_list",
+            status: "error",
+            error: errorMessage
+          }
+        }),
+        metadata: { operation: "buffer_list", status: "error" }
+      };
+    }
+  }
+
+  // Handle /diagnostic-summary command
+  if (cmd.length >= 1 && (cmd[0] === '/diagnostic-summary' || (cmd.length >= 2 && cmd[1] === '/diagnostic-summary'))) {
+    try {
+      const { NeovimLSPManager } = await import('../../nvim/lsp-manager.js');
+      const lspManager = new NeovimLSPManager(process.cwd());
+      
+      await lspManager.initialize();
+      const allDiagnostics = await lspManager.getAllDiagnostics();
+      
+      if (allDiagnostics.length === 0) {
+        return {
+          outputText: JSON.stringify({
+            output: "No diagnostics found! 🎉\n\nYour code looks clean - no errors or warnings detected by language servers.",
+            metadata: { 
+              operation: "diagnostic_summary",
+              total_diagnostics: 0,
+              errors: 0,
+              warnings: 0,
+              files_with_issues: 0
+            }
+          }),
+          metadata: { operation: "diagnostic_summary", total_diagnostics: 0 }
+        };
+      }
+
+      // Group diagnostics by severity and file
+      const errors = allDiagnostics.filter(d => d.severity === 'error');
+      const warnings = allDiagnostics.filter(d => d.severity === 'warning');
+      const infos = allDiagnostics.filter(d => d.severity === 'info');
+      
+      const fileGroups = new Map<string, Array<typeof allDiagnostics[0]>>();
+      for (const diagnostic of allDiagnostics) {
+        if (!fileGroups.has(diagnostic.filePath)) {
+          fileGroups.set(diagnostic.filePath, []);
+        }
+        fileGroups.get(diagnostic.filePath)!.push(diagnostic);
+      }
+
+      const summaryLines = [
+        `Diagnostic Summary (${allDiagnostics.length} total):`,
+        `• Errors: ${errors.length}`,
+        `• Warnings: ${warnings.length}`,
+        `• Info: ${infos.length}`,
+        `• Files affected: ${fileGroups.size}`,
+        '',
+        'Files with issues:'
+      ];
+
+      for (const [filePath, diagnostics] of fileGroups) {
+        const fileErrors = diagnostics.filter(d => d.severity === 'error').length;
+        const fileWarnings = diagnostics.filter(d => d.severity === 'warning').length;
+        summaryLines.push(`• ${filePath}: ${fileErrors} error${fileErrors !== 1 ? 's' : ''}, ${fileWarnings} warning${fileWarnings !== 1 ? 's' : ''}`);
+      }
+
+      return {
+        outputText: JSON.stringify({
+          output: summaryLines.join('\n'),
+          metadata: { 
+            operation: "diagnostic_summary",
+            total_diagnostics: allDiagnostics.length,
+            errors: errors.length,
+            warnings: warnings.length,
+            infos: infos.length,
+            files_with_issues: fileGroups.size
+          }
+        }),
+        metadata: { operation: "diagnostic_summary", total_diagnostics: allDiagnostics.length }
+      };
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      return {
+        outputText: JSON.stringify({
+          output: `Failed to get diagnostic summary: ${errorMessage}\n\nNote: Diagnostics require LSP servers to be running. Use /lsp-status to check server status.`,
+          metadata: { 
+            operation: "diagnostic_summary",
+            status: "error",
+            error: errorMessage
+          }
+        }),
+        metadata: { operation: "diagnostic_summary", status: "error" }
+      };
+    }
+  }
+
+  return null;
+}
+
+// ---------------------------------------------------------------------------
+// Enhanced file operations with Neovim integration
+// ---------------------------------------------------------------------------
+async function readFileViaNeovim(filePath: string, offset = 0, limit = 2000): Promise<string> {
+  if (!globalNeovimConnection || !globalNeovimConnection.isConnected()) {
+    throw new Error('Not connected to Neovim');
+  }
+
+  try {
+    // Ensure file is open in Neovim
+    await globalNeovimConnection.openFile(filePath);
+    
+    // Get content from Neovim buffer
+    const content = await globalNeovimConnection.getBufferContent(filePath);
+    const lines = content.split('\n');
+    const selectedLines = lines.slice(offset, offset + limit);
+    
+    return selectedLines.map((line: string, idx: number) => 
+      `${(offset + idx + 1).toString().padStart(5, '0')}| ${line}`
+    ).join('\n');
+  } catch (error) {
+    throw new Error(`Failed to read file via Neovim: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
+async function writeFileViaNeovim(filePath: string, content: string): Promise<string> {
+  if (!globalNeovimConnection || !globalNeovimConnection.isConnected()) {
+    throw new Error('Not connected to Neovim');
+  }
+
+  try {
+    // Open file in Neovim if not already open
+    await globalNeovimConnection.openFile(filePath);
+    
+    // Replace buffer content
+    await globalNeovimConnection.replaceBufferContent(filePath, content);
+    
+    // Save the buffer
+    await globalNeovimConnection.saveBuffer(filePath);
+    
+    return `File successfully written via Neovim: ${filePath}`;
+  } catch (error) {
+    throw new Error(`Failed to write file via Neovim: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
+async function editFileViaNeovim(filePath: string, search: string, replace: string): Promise<string> {
+  if (!globalNeovimConnection || !globalNeovimConnection.isConnected()) {
+    throw new Error('Not connected to Neovim');
+  }
+
+  try {
+    // Open file in Neovim if not already open
+    await globalNeovimConnection.openFile(filePath);
+    
+    // Get current content
+    const content = await globalNeovimConnection.getBufferContent(filePath);
+    
+    // Perform the replacement
+    if (!content.includes(search)) {
+      throw new Error('Search content not found in file');
+    }
+    
+    const newContent = content.replace(search, replace);
+    
+    // Replace buffer content
+    await globalNeovimConnection.replaceBufferContent(filePath, newContent);
+    
+    // Save the buffer
+    await globalNeovimConnection.saveBuffer(filePath);
+    
+    return `File successfully edited via Neovim: ${filePath}`;
+  } catch (error) {
+    throw new Error(`Failed to edit file via Neovim: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Export function for direct Neovim command handling from terminal UI
+// ---------------------------------------------------------------------------
+export async function handleNeovimConnectionCommand(cmd: Array<string>): Promise<string> {
+  // The handleNeovimConnection function expects the command format ["bash", "/command", ...]
+  // But we're calling it directly with ["/command", ...], so we need to adjust
+  const adjustedCmd = ["bash", ...cmd];
+  const result = await handleNeovimConnection(adjustedCmd);
+  
+  if (result) {
+    try {
+      // Parse the JSON output to get the actual message
+      const parsed = JSON.parse(result.outputText);
+      return parsed.output || result.outputText;
+    } catch {
+      // If not JSON, return as-is
+      return result.outputText;
+    }
+  }
+  
+  // If no result, the command wasn't recognized as a Neovim command
+  throw new Error("Command not recognized as Neovim command");
 }

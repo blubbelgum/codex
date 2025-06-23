@@ -4,7 +4,6 @@ import type { CommandConfirmation } from "./agent-loop";
 import type { ResponseItem, ResponseInputItem } from "openai/resources/responses/responses";
 
 import { AgentLoop } from "./agent-loop";
-import { AutoApprovalMode } from "../auto-approval-mode";
 import { RolloutReplay, createRolloutReplay } from "../rollout-replay";
 import { ReviewDecision } from "./review";
 

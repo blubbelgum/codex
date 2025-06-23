@@ -597,3 +597,38 @@ function isParseEntryWithOp(
     typeof (entry as { op?: unknown }).op === "string"
   );
 }
+
+// Add stub implementations for missing functions
+function identify_files_needed(applyPatchArg: string): Array<string> {
+  // Extract filenames from patch content
+  const lines = applyPatchArg.split('\n');
+  const files: Array<string> = [];
+  
+  for (const line of lines) {
+    // Look for file headers like "--- a/filename" or "+++ b/filename"
+    const match = line.match(/^[+-]{3}\s+[ab]\/(.+)$/);
+    if (match && match[1]) {
+      files.push(match[1]);
+    }
+  }
+  
+  return [...new Set(files)]; // Remove duplicates
+}
+
+function identify_files_added(applyPatchArg: string): Array<string> {
+  // Extract new file additions from patch content
+  const lines = applyPatchArg.split('\n');
+  const addedFiles: Array<string> = [];
+  
+  for (const line of lines) {
+    // Look for new file indicators like "+++ b/filename" with "/dev/null" in previous line
+    if (line.startsWith('+++ b/') && !line.includes('/dev/null')) {
+      const match = line.match(/^\+\+\+ b\/(.+)$/);
+      if (match && match[1]) {
+        addedFiles.push(match[1]);
+      }
+    }
+  }
+  
+  return addedFiles;
+}

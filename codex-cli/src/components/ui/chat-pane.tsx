@@ -30,20 +30,21 @@ export function ChatPane({
   imagePaths: initialImagePaths,
   approvalPolicy,
   additionalWritableRoots,
-  fullStdout,
+  fullStdout: _fullStdout,
   isActive = true,
   width = 80,
   height = 20,
-}: ChatPaneProps) {
+}: ChatPaneProps): React.ReactElement {
   const [items, setItems] = useState<Array<ResponseItem>>([]);
   const [loading, setLoading] = useState<boolean>(false);
-  const [inputText, setInputText] = useState<string>('');
-  const [lastResponseId, setLastResponseId] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [_inputText, _setInputText] = useState<string>('');
+  const [_lastResponseId, _setLastResponseId] = useState<string | null>(null);
   const agentRef = useRef<AgentLoop>();
 
   // Initialize agent
   useEffect(() => {
-    const sessionId = crypto.randomUUID();
+    const _sessionId = crypto.randomUUID();
     
     agentRef.current = new AgentLoop({
       model: config.model,
@@ -53,13 +54,13 @@ export function ChatPane({
       approvalPolicy,
       disableResponseStorage: config.disableResponseStorage,
       additionalWritableRoots,
-      onLastResponseId: setLastResponseId,
+      onLastResponseId: _setLastResponseId,
       onItem: (item) => {
         setItems((prev) => uniqueById([...prev, item as ResponseItem]));
       },
       onLoading: setLoading,
       getCommandConfirmation: async (
-        command: Array<string>,
+        _command: Array<string>,
       ): Promise<CommandConfirmation> => {
         // For now, auto-approve based on approval policy
         const review = approvalPolicy === 'full-auto' ? ReviewDecision.YES : ReviewDecision.NO_CONTINUE;
@@ -81,7 +82,7 @@ export function ChatPane({
         const inputItem = await createInputItem(initialPrompt, initialImagePaths || []);
         await agentRef.current.run([inputItem]);
       } catch (error) {
-        console.error('Error processing initial prompt:', error);
+        setError(error instanceof Error ? error.message : 'Failed to process initial prompt');
       }
     };
 
@@ -91,7 +92,7 @@ export function ChatPane({
   // Format chat items for display
   const formatItemForDisplay = (item: ResponseItem): string => {
     switch (item.type) {
-      case 'message':
+      case 'message': {
         const role = item.role === 'assistant' ? '🤖 Assistant' : '👤 You';
         const content = item.content
           .map((c) => {
@@ -108,16 +109,18 @@ export function ChatPane({
           })
           .join('\n');
         return `${role}:\n${content}`;
-      
-      case 'function_call':
+      }
+
+      case 'function_call': {
         const command = formatCommandForDisplay([item.name, ...(item.arguments ? [item.arguments] : [])]);
         return `💻 Running command:\n$ ${command}`;
-      
-      case 'function_call_output':
-        const output = item.output.length > 200 ? 
-          item.output.substring(0, 200) + '...\n[Output truncated]' : 
-          item.output;
+      }
+      case 'function_call_output': {
+        const output = item.output.length > 200
+          ? item.output.substring(0, 200) + '...\n[Output truncated]'
+          : item.output;
         return `📤 Command output:\n${output}`;
+      }
       
       default:
         return `[${item.type}]`;
@@ -135,6 +138,13 @@ export function ChatPane({
           {displayContent}
         </SelectableText>
       </Box>
+
+      {/* Error indicator */}
+      {error && (
+        <Box paddingX={1}>
+          <Text color="red">❌ Error: {error}</Text>
+        </Box>
+      )}
 
       {/* Loading indicator */}
       {loading && (

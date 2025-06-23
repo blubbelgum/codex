@@ -188,7 +188,7 @@ export function FilePreview({
   };
 
   // Get git status for file
-  const getGitStatus = async (filepath: string): Promise<'modified' | 'added' | 'deleted' | 'untracked' | null> => {
+  const getGitStatus = async (_filepath: string): Promise<'modified' | 'added' | 'deleted' | 'untracked' | null> => {
     try {
       // This is a simplified git status check - in a real implementation you'd use a git library
       // For now, we'll just return null to avoid shell dependencies
@@ -411,7 +411,7 @@ export function FilePreview({
     try {
       // Handle headers
       if (line.startsWith('#')) {
-        const level = line.match(/^#+/)?.[0].length || 1;
+        const _level = line.match(/^#+/)?.[0].length || 1;
         const headerText = line.replace(/^#+\s*/, '');
         return <Text color="blue" bold>{headerText}</Text>;
       }
@@ -521,11 +521,11 @@ export function FilePreview({
   };
 
   // Calculate effective font size based on zoom
-  const getEffectiveFontSize = (): string => {
+  const _getEffectiveFontSize = (): string => {
     const sizes = ['xs', 'sm', 'md', 'lg', 'xl'];
     const baseIndex = 2; // 'md'
     const effectiveIndex = Math.max(0, Math.min(sizes.length - 1, baseIndex + zoomLevel));
-    return sizes[effectiveIndex];
+    return sizes[effectiveIndex] || 'md';
   };
 
   if (!filePath) {

@@ -37,7 +37,7 @@ export function FileNavigator({
   const [showHiddenFiles, setShowHiddenFiles] = useState(showHidden);
   // Search state: if true, filter files by searchQuery
   const [isSearching, setIsSearching] = useState(false);
-  const [searchQuery, setSearchQuery] = useState('');
+  const [_searchQuery, setSearchQuery] = useState('');
   const { copyToClipboard } = useClipboard();
 
   // Load directory contents
@@ -228,7 +228,7 @@ export function FileNavigator({
     return `${size.toFixed(1)}${units[unitIndex]}`;
   };
 
-  const formatDate = (date?: Date): string => {
+  const _formatDate = (date?: Date): string => {
     if (!date) {return '';}
     return date.toLocaleDateString();
   };

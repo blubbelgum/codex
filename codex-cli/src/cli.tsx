@@ -725,10 +725,6 @@ async function runQuietMode({
   // Check if we should use rollout replay mode
   const useReplay = RolloutReplay.shouldUseReplay();
   
-  if (useReplay) {
-    console.log('🎬 [Rollout Replay] Detected test environment - using rollout replay mode');
-  }
-
   const agent = useReplay ? createRolloutAwareAgentLoop({
     model: config.model,
     config: config,

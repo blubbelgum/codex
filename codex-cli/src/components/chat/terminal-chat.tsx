@@ -25,6 +25,7 @@ import {
   calculateContextPercentRemaining,
   uniqueById,
 } from "../../utils/model-utils.js";
+import { getNeovimConnectionStatus } from "../../utils/neovim-status.js";
 import { createOpenAIClient } from "../../utils/openai-client.js";
 import { RolloutReplay } from "../../utils/rollout-replay.js";
 import { shortCwd } from "../../utils/short-path.js";
@@ -666,6 +667,25 @@ export default function TerminalChat({
     [items, model],
   );
 
+  // Track Neovim connection status
+  const [neovimConnected, setNeovimConnected] = useState(false);
+
+  useEffect(() => {
+    // Check Neovim connection status periodically
+    async function checkNeovimStatus() {
+      const status = await getNeovimConnectionStatus();
+      setNeovimConnected(status.connected);
+    }
+    
+    // Check immediately
+    checkNeovimStatus();
+    
+    // Check every 2 seconds
+    const interval = setInterval(checkNeovimStatus, 2000);
+    
+    return () => clearInterval(interval);
+  }, []);
+
   if (viewRollout) {
     return (
       <TerminalChatPastRollout
@@ -703,6 +723,7 @@ export default function TerminalChat({
               flexModeEnabled: Boolean(config.flexMode),
               showTabInfo: true,
               backgroundProcesses,
+              neovimConnected,
             }}
             fileOpener={config.fileOpener}
           />

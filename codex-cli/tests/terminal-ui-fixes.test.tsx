@@ -1,8 +1,6 @@
 import React from 'react';
 import { render } from 'ink-testing-library';
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import type { AppConfig } from '../src/utils/config.js';
-import { AutoApprovalMode } from '../src/utils/auto-approval-mode.js';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { FilePreview } from '../src/components/ui/file-preview.js';
 
 // Mock Ink's internal components

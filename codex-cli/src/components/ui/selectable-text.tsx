@@ -1,8 +1,7 @@
 import { useClipboard } from '../../hooks/use-clipboard.js';
 import { useTextSelection } from '../../hooks/use-text-selection.js';
-import chalk from 'chalk';
 import { Box, Text, useInput } from 'ink';
-import React, { useEffect, useMemo } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 
 interface SelectableTextProps {
   children: string;
@@ -18,10 +17,10 @@ export function SelectableText({
   highlightColor = 'bgBlue',
   onCopy,
   showCopyNotification = true,
-}: SelectableTextProps) {
+}: SelectableTextProps): React.ReactElement {
   const lines = useMemo(() => children.split('\n'), [children]);
   const { copyToClipboard, isSupported } = useClipboard();
-  const [showNotification, setShowNotification] = React.useState(false);
+  const [showNotification, setShowNotification] = useState(false);
   
   const { selection, cursorPosition } = useTextSelection({
     content: lines,
@@ -56,6 +55,7 @@ export function SelectableText({
       const timer = setTimeout(() => setShowNotification(false), 2000);
       return () => clearTimeout(timer);
     }
+    return undefined;
   }, [showNotification]);
 
   const renderLine = (line: string, lineIndex: number) => {
