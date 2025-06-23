@@ -1452,16 +1452,17 @@ export class AgentLoop {
               .filter(Boolean)
               .join("\n");
 
-            const responseCall =
-              !this.provider ||
-              this.provider.toLowerCase() === "openai"
-                ? (params: ResponseCreateParams) =>
-                    this.oai.responses.create(params)
-                : (params: ResponseCreateParams) =>
-                    responsesCreateViaChatCompletions(
-                      this.oai,
-                      params as ResponseCreateParams & { stream: true },
-                    );
+                          const responseCall =
+                !this.provider ||
+                this.provider.toLowerCase() === "openai" ||
+                this.provider.toLowerCase() === "azure"
+                  ? (params: ResponseCreateParams) =>
+                      this.oai.responses.create(params)
+                  : (params: ResponseCreateParams) =>
+                      responsesCreateViaChatCompletions(
+                        this.oai,
+                        params as ResponseCreateParams & { stream: true },
+                      );
             log(
               `instructions (length ${mergedInstructions.length}): ${mergedInstructions}`,
             );
@@ -1840,16 +1841,17 @@ export class AgentLoop {
                 .filter(Boolean)
                 .join("\n");
 
-              const responseCall =
-                !this.provider ||
-                this.provider.toLowerCase() === "openai"
-                  ? (params: ResponseCreateParams) =>
-                      this.oai.responses.create(params)
-                  : (params: ResponseCreateParams) =>
-                      responsesCreateViaChatCompletions(
-                        this.oai,
-                        params as ResponseCreateParams & { stream: true },
-                      );
+                          const responseCall =
+              !this.provider ||
+              this.provider.toLowerCase() === "openai" ||
+              this.provider.toLowerCase() === "azure"
+                ? (params: ResponseCreateParams) =>
+                    this.oai.responses.create(params)
+                : (params: ResponseCreateParams) =>
+                    responsesCreateViaChatCompletions(
+                      this.oai,
+                      params as ResponseCreateParams & { stream: true },
+                    );
 
               log(
                 "agentLoop.run(): responseCall(1): turnInput: " +
